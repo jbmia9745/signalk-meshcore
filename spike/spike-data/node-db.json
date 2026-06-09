@@ -85,5 +85,12 @@
     "seen": "2026-06-09T23:25:55.000Z",
     "advLat": 25.75927,
     "advLon": -80.216278
+  },
+  "8493cf39c7f7366fe3a4ca0125ad7d1c1c7d5c6bde6878c24d55dc887bc53e8a": {
+    "name": "Coral Springs Pine Ridg",
+    "type": 2,
+    "seen": "2026-06-09T23:31:18.000Z",
+    "advLat": 26.296,
+    "advLon": -80.24389
   }
 }

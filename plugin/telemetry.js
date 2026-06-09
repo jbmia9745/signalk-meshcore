@@ -80,9 +80,16 @@ class Telemetry {
       ? this.wind.formatDirection(d[this.wind.directionPath])
       : null;
     const ws = d[this.wind.speedPath];
-    const speed = (Array.isArray(ws) && ws.length)
-      ? `${units.msToKn(median(ws)).toFixed(1)}k`
-      : null;
+    let speed = null;
+    if (Array.isArray(ws) && ws.length) {
+      const med = units.msToKn(median(ws));
+      const gust = units.msToKn(Math.max(...ws));
+      speed = `${med.toFixed(1)}k`;
+      // show the gust only when it meaningfully exceeds the median
+      if (gust >= med + 2) {
+        speed += ` g${gust.toFixed(1)}`;
+      }
+    }
     if (dir && speed) {
       out.wind = `${dir}@${speed}${this.wind.suffix}`;
     } else if (speed) {

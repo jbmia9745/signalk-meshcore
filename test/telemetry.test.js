@@ -47,10 +47,23 @@ test('wind renders with only one of direction/speed available', () => {
   assert.strictEqual(t.segments().wind, 'S@10.3k');
 });
 
+test('gusts appear when max meaningfully exceeds the median', () => {
+  const t = new Telemetry();
+  // median 5.29 m/s ≈ 10.3 kn; gust 9 m/s ≈ 17.5 kn
+  [5.29, 5.1, 9.0].forEach((v) => t.update('environment.wind.speedOverGround', v));
+  assert.strictEqual(t.segments().wind, '10.3k g17.5 wind');
+  t.update('environment.wind.directionTrue', 0.506);
+  assert.strictEqual(t.segments().wind, 'NE@10.3k g17.5');
+  // steady wind → no gust shown
+  const steady = new Telemetry();
+  [5.29, 5.3, 5.2].forEach((v) => steady.update('environment.wind.speedOverGround', v));
+  assert.strictEqual(steady.segments().wind, '10.3k wind');
+});
+
 test('wind speed accumulates and reads as median, non-destructively', () => {
   const t = new Telemetry();
   [2, 10, 4].forEach((v) => t.update('environment.wind.speedOverGround', v));
-  const expected = `${(4 * 1.94384).toFixed(1)}k wind`;
+  const expected = `${(4 * 1.94384).toFixed(1)}k g${(10 * 1.94384).toFixed(1)} wind`;
   assert.strictEqual(t.segments().wind, expected);
   // second read still works (read does not clear)
   assert.strictEqual(t.segments().wind, expected);
