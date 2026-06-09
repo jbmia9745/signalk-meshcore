@@ -1,37 +1,24 @@
 // Telemetry pull verbs: wx | batt | pos | depth | status
 const VERBS = ['wx', 'batt', 'pos', 'depth', 'status'];
 
-function fmt(fields, keys) {
-  return keys
-    .filter((k) => fields[k] !== undefined)
-    .map((k) => `${k}${fields[k]}`)
-    .join(' ');
-}
-
 module.exports = {
   crewOnly: false,
   example: 'WX | Batt | Pos | Depth | Status',
   accept: (msg) => VERBS.includes(msg.data.trim().toLowerCase()),
   handle: (msg, settings, device, app, telemetry) => {
     const verb = msg.data.trim().toLowerCase();
-    const f = telemetry.toImperial();
+    const s = telemetry.segments();
+    const join = (keys) => telemetry.constructor.joinSegments(s, keys);
     let reply;
     switch (verb) {
       case 'wx':
-        reply = fmt(f, ['T', 'H', 'P', telemetry.wind.directionLabel, telemetry.wind.speedLabel])
-          || 'No wx data';
+        reply = join(['temp', 'humidity', 'pressure', 'wind']) || 'No wx data';
         break;
       case 'batt':
-        reply = fmt(f, ['Vb', 'Ib', 'SoC']) || 'No batt data';
+        reply = join(['voltage', 'current', 'soc']) || 'No batt data';
         break;
       case 'depth':
-        if (f.Anc !== undefined) {
-          reply = `Anc${f.Anc}`;
-        } else if (f.D !== undefined) {
-          reply = `D${f.D}`;
-        } else {
-          reply = 'No depth data';
-        }
+        reply = s.depth || 'No depth data';
         break;
       case 'pos': {
         const p = telemetry.position;

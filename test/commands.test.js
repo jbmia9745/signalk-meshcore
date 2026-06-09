@@ -82,10 +82,10 @@ test('telemetry verbs reply with formatted fields', async () => {
   assert.strictEqual(commands.telemetry.accept(verb('nope')), false);
 
   await commands.telemetry.handle(verb('wx'), settings, device, null, telemetry);
-  assert.strictEqual(device.sent[0].text, 'T89');
+  assert.strictEqual(device.sent[0].text, '89F');
 
   await commands.telemetry.handle(verb('batt'), settings, device, null, telemetry);
-  assert.strictEqual(device.sent[1].text, 'Vb13.3');
+  assert.strictEqual(device.sent[1].text, '13.3v');
 
   await commands.telemetry.handle(verb('pos'), settings, device, null, telemetry);
   assert.strictEqual(device.sent[2].text, '38.97000,-76.48000');
@@ -94,7 +94,7 @@ test('telemetry verbs reply with formatted fields', async () => {
   assert.strictEqual(device.sent[3].text, 'No depth data');
 
   await commands.telemetry.handle(verb('status'), settings, device, null, telemetry);
-  assert.strictEqual(device.sent[4].text, 'VESSEL T89 Vb13.3');
+  assert.strictEqual(device.sent[4].text, 'VESSEL | 89F | 13.3v');
 });
 
 test('help lists crew-only commands only for crew', async () => {

@@ -71,5 +71,19 @@
     "seen": "2026-06-09T21:04:53.000Z",
     "advLat": 26.22653,
     "advLon": -80.12819
+  },
+  "527232971d4632a8f32672d5e536a5e1ff5bcf12ba6516fb8d516fb7cae4a5b8": {
+    "name": "HMSTD TRON V4",
+    "type": 2,
+    "seen": "2026-06-09T23:25:39.000Z",
+    "advLat": 25.55143,
+    "advLon": -80.45136
+  },
+  "7e437f1e77a2aa9d121ec2a1e2a566c92f3e775eab35ef2f268fa7543d451fd4": {
+    "name": "CW13 RPTR",
+    "type": 2,
+    "seen": "2026-06-09T23:25:55.000Z",
+    "advLat": 25.75927,
+    "advLon": -80.216278
   }
 }

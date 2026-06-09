@@ -13,50 +13,59 @@ function feedVessel(t) {
   t.update('environment.depth.belowSurface', 4.384);
 }
 
-test('buildLine matches the spec example with true wind', () => {
+test('buildLine renders the human pipe-delimited format', () => {
   const t = new Telemetry({ windSource: 'true' });
   feedVessel(t);
   t.update('environment.wind.directionTrue', 0.506);
   t.update('environment.wind.speedOverGround', 5.29);
   assert.strictEqual(
     t.buildLine('VESSEL'),
-    'VESSEL T89 H67 P1019 WdNE Ws10.3 Vb13.3 SoC99 Ib-6.4 D14',
+    'VESSEL | 89F | 67% | 1019mb | NE@10.3k | 14ft | 99%soc | 13.3v | -6.4a',
   );
 });
 
-test('apparent wind source relabels and renders bow angle', () => {
+test('charging current gets an explicit plus sign', () => {
+  const t = new Telemetry();
+  t.update('electrical.batteries.house.current', 12.3);
+  assert.strictEqual(t.segments().current, '+12.3a');
+});
+
+test('apparent wind is marked and rendered as bow angle', () => {
   const t = new Telemetry({ windSource: 'apparent' });
   t.update('environment.wind.angleApparent', 0.506); // ≈ 29° starboard
   t.update('environment.wind.speedApparent', 5.29);
   // true-wind paths must be ignored in apparent mode
   t.update('environment.wind.directionTrue', 1.0);
-  const f = t.toImperial();
-  assert.strictEqual(f.Wa, '29S');
-  assert.strictEqual(f.Wsa, '10.3');
-  assert.strictEqual(f.Wd, undefined);
-  assert.strictEqual(f.Ws, undefined);
+  assert.strictEqual(t.segments().wind, '29S@10.3k(A)');
+});
+
+test('wind renders with only one of direction/speed available', () => {
+  const t = new Telemetry();
+  t.update('environment.wind.directionTrue', Math.PI); // S
+  assert.strictEqual(t.segments().wind, 'S wind');
+  t.update('environment.wind.speedOverGround', 5.29);
+  assert.strictEqual(t.segments().wind, 'S@10.3k');
 });
 
 test('wind speed accumulates and reads as median, non-destructively', () => {
   const t = new Telemetry();
   [2, 10, 4].forEach((v) => t.update('environment.wind.speedOverGround', v));
-  assert.strictEqual(t.toImperial().Ws, (4 * 1.94384).toFixed(1));
+  const expected = `${(4 * 1.94384).toFixed(1)}k wind`;
+  assert.strictEqual(t.segments().wind, expected);
   // second read still works (read does not clear)
-  assert.strictEqual(t.toImperial().Ws, (4 * 1.94384).toFixed(1));
+  assert.strictEqual(t.segments().wind, expected);
   t.clearWindHistory();
-  assert.strictEqual(t.toImperial().Ws, undefined);
+  assert.strictEqual(t.segments().wind, undefined);
 });
 
-test('anchor distance takes precedence over depth', () => {
+test('anchor distance takes precedence over depth and is marked', () => {
   const t = new Telemetry();
   t.update('environment.depth.belowSurface', 4.384);
   t.update('navigation.anchor.distanceFromBow', 30);
-  const f = t.toImperial();
-  assert.strictEqual(f.Anc, 98);
-  assert.strictEqual(f.D, undefined);
+  assert.strictEqual(t.segments().depth, 'anc 98ft');
 });
 
-test('position is stored, null-island and non-finite rejected', () => {
+test('position is stored, non-finite rejected', () => {
   const t = new Telemetry();
   t.update('navigation.position', { latitude: 38.97, longitude: -76.48 });
   assert.deepStrictEqual(t.position, { latitude: 38.97, longitude: -76.48 });
@@ -70,5 +79,15 @@ test('buildLine returns null with no data, omits name when not given', () => {
   const t = new Telemetry();
   assert.strictEqual(t.buildLine('VESSEL'), null);
   t.update('environment.outside.temperature', 304.67);
-  assert.strictEqual(t.buildLine(), 'T89');
+  assert.strictEqual(t.buildLine(), '89F');
+});
+
+test('full line stays within the 133-char send cap', () => {
+  const t = new Telemetry();
+  feedVessel(t);
+  t.update('environment.wind.directionTrue', 0.506);
+  t.update('environment.wind.speedOverGround', 5.29);
+  t.update('navigation.anchor.distanceFromBow', 123.4);
+  const line = t.buildLine('A-LONGISH-VESSEL-NAME');
+  assert.ok(line.length <= 133, `line too long: ${line.length}`);
 });
