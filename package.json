@@ -1,0 +1,33 @@
+{
+  "name": "signalk-meshcore",
+  "version": "0.1.0",
+  "description": "Signal K plugin for interfacing with the MeshCore LoRa mesh network",
+  "scripts": {
+    "lint": "eslint .",
+    "test": "node --test test/"
+  },
+  "keywords": [
+    "meshcore",
+    "signalk-node-server-plugin",
+    "signalk-category-ais",
+    "signalk-category-hardware"
+  ],
+  "main": "plugin/index.js",
+  "signalk-plugin-enabled-by-default": false,
+  "author": "John Rbek <johnrbek@yahoo.com>",
+  "license": "GPL-3.0-only",
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@liamcottle/meshcore.js": "^1.13.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.1",
+    "eslint-config-airbnb-base": "^15.0.0",
+    "eslint-plugin-import": "^2.32.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
