@@ -307,9 +307,13 @@ module.exports = (app) => {
           connection = new meshcore.TCPConnection(address, (settings.device.port || 5000));
         }
 
-        // serial open failures only emit 'error' — enforce our own timeout
+        // serial open failures only emit 'error' — enforce our own timeout,
+        // and release the half-open port or the retry locks itself out
         const connectTimeout = setTimeout(() => {
           app.error(`Connect to ${address} timed out, retrying in 30s`);
+          if (connection) {
+            connection.close();
+          }
           retryTimer = setTimeout(() => restart(settings), 30000);
         }, CONNECT_TIMEOUT_MS);
 
