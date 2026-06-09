@@ -18,7 +18,7 @@ module.exports = {
         reply = join(['voltage', 'current', 'soc']) || 'No batt data';
         break;
       case 'depth':
-        reply = s.depth || 'No depth data';
+        reply = join(['depth', 'anchor']) || 'No depth data';
         break;
       case 'pos': {
         const p = telemetry.position;

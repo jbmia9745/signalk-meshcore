@@ -58,11 +58,15 @@ test('wind speed accumulates and reads as median, non-destructively', () => {
   assert.strictEqual(t.segments().wind, undefined);
 });
 
-test('anchor distance takes precedence over depth and is marked', () => {
+test('depth and anchor distance are separate segments', () => {
   const t = new Telemetry();
   t.update('environment.depth.belowSurface', 4.384);
   t.update('navigation.anchor.distanceFromBow', 30);
-  assert.strictEqual(t.segments().depth, 'anc 98ft');
+  const s = t.segments();
+  assert.strictEqual(s.depth, '14ft');
+  assert.strictEqual(s.anchor, 'anc 98ft');
+  t.update('electrical.batteries.house.voltage', 13.29);
+  assert.strictEqual(t.buildLine(), '14ft | anc 98ft | 13.3v');
 });
 
 test('position is stored, non-finite rejected', () => {

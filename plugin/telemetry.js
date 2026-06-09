@@ -90,10 +90,11 @@ class Telemetry {
     } else if (dir) {
       out.wind = `${dir} wind${this.wind.suffix}`;
     }
-    if (Number.isFinite(d['navigation.anchor.distanceFromBow'])) {
-      out.depth = `anc ${Math.round(units.mToFt(d['navigation.anchor.distanceFromBow']))}ft`;
-    } else if (Number.isFinite(d['environment.depth.belowSurface'])) {
+    if (Number.isFinite(d['environment.depth.belowSurface'])) {
       out.depth = `${Math.round(units.mToFt(d['environment.depth.belowSurface']))}ft`;
+    }
+    if (Number.isFinite(d['navigation.anchor.distanceFromBow'])) {
+      out.anchor = `anc ${Math.round(units.mToFt(d['navigation.anchor.distanceFromBow']))}ft`;
     }
     if (Number.isFinite(d['electrical.batteries.house.capacity.stateOfCharge'])) {
       out.soc = `${Math.round(units.ratioToPct(d['electrical.batteries.house.capacity.stateOfCharge']))}%soc`;
@@ -119,7 +120,7 @@ class Telemetry {
     const s = this.segments();
     const body = Telemetry.joinSegments(
       s,
-      ['temp', 'humidity', 'pressure', 'wind', 'depth', 'soc', 'voltage', 'current'],
+      ['temp', 'humidity', 'pressure', 'wind', 'depth', 'anchor', 'soc', 'voltage', 'current'],
     );
     if (!body) {
       return null;
