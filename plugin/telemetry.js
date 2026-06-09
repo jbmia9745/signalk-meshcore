@@ -91,7 +91,7 @@ class Telemetry {
       out.wind = `${dir} wind${this.wind.suffix}`;
     }
     if (Number.isFinite(d['environment.depth.belowSurface'])) {
-      out.depth = `${Math.round(units.mToFt(d['environment.depth.belowSurface']))}ft`;
+      out.depth = `dpt ${Math.round(units.mToFt(d['environment.depth.belowSurface']))}ft`;
     }
     if (Number.isFinite(d['navigation.anchor.distanceFromBow'])) {
       out.anchor = `anc ${Math.round(units.mToFt(d['navigation.anchor.distanceFromBow']))}ft`;

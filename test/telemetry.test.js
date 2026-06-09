@@ -20,7 +20,7 @@ test('buildLine renders the human pipe-delimited format', () => {
   t.update('environment.wind.speedOverGround', 5.29);
   assert.strictEqual(
     t.buildLine('VESSEL'),
-    'VESSEL | 89F | 67% | 1019mb | NE@10.3k | 14ft | 99%soc | 13.3v | -6.4a',
+    'VESSEL | 89F | 67% | 1019mb | NE@10.3k | dpt 14ft | 99%soc | 13.3v | -6.4a',
   );
 });
 
@@ -63,10 +63,10 @@ test('depth and anchor distance are separate segments', () => {
   t.update('environment.depth.belowSurface', 4.384);
   t.update('navigation.anchor.distanceFromBow', 30);
   const s = t.segments();
-  assert.strictEqual(s.depth, '14ft');
+  assert.strictEqual(s.depth, 'dpt 14ft');
   assert.strictEqual(s.anchor, 'anc 98ft');
   t.update('electrical.batteries.house.voltage', 13.29);
-  assert.strictEqual(t.buildLine(), '14ft | anc 98ft | 13.3v');
+  assert.strictEqual(t.buildLine(), 'dpt 14ft | anc 98ft | 13.3v');
 });
 
 test('position is stored, non-finite rejected', () => {
