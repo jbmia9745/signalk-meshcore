@@ -4,7 +4,7 @@
   "description": "Signal K plugin for interfacing with the MeshCore LoRa mesh network",
   "scripts": {
     "lint": "eslint .",
-    "test": "node --test test/"
+    "test": "node --test"
   },
   "keywords": [
     "meshcore",
