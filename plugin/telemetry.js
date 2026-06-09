@@ -73,7 +73,7 @@ class Telemetry {
       out.H = Math.round(units.ratioToPct(d['environment.outside.relativeHumidity']));
     }
     if (Number.isFinite(d['environment.outside.pressure'])) {
-      out.P = units.paToInHg(d['environment.outside.pressure']).toFixed(2);
+      out.P = Math.round(units.paToMb(d['environment.outside.pressure']));
     }
     if (Number.isFinite(d[this.wind.directionPath])) {
       out[this.wind.directionLabel] = this.wind.formatDirection(d[this.wind.directionPath]);

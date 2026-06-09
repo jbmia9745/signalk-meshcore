@@ -4,6 +4,7 @@ module.exports = {
   kToF: (k) => ((k - 273.15) * 1.8) + 32,
   ratioToPct: (r) => r * 100,
   paToInHg: (pa) => pa / 3386.389,
+  paToMb: (pa) => pa / 100,
   msToKn: (ms) => ms * 1.94384,
   mToFt: (m) => m * 3.28084,
   radToDeg: (rad) => ((((rad * 180) / Math.PI) % 360) + 360) % 360,

@@ -18,6 +18,10 @@ test('paToInHg converts VESSEL pressure', () => {
   assert.strictEqual(units.paToInHg(101928).toFixed(2), '30.10');
 });
 
+test('paToMb converts VESSEL pressure', () => {
+  assert.strictEqual(Math.round(units.paToMb(101928)), 1019);
+});
+
 test('msToKn', () => {
   assert.strictEqual(units.msToKn(5.29).toFixed(1), '10.3');
 });

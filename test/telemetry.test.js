@@ -20,7 +20,7 @@ test('buildLine matches the spec example with true wind', () => {
   t.update('environment.wind.speedOverGround', 5.29);
   assert.strictEqual(
     t.buildLine('VESSEL'),
-    'VESSEL T89 H67 P30.10 WdNE Ws10.3 Vb13.3 SoC99 Ib-6.4 D14',
+    'VESSEL T89 H67 P1019 WdNE Ws10.3 Vb13.3 SoC99 Ib-6.4 D14',
   );
 });
 
