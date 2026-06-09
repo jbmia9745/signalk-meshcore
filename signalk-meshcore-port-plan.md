@@ -398,7 +398,7 @@ One experienced engineer:
 
 ## 9. Open items `[OPEN]`
 
-1. **MeshCore max text payload size** — unverified. Sets the hard cap on the push line; if tight, split or drop low-priority fields. Verify in Phase 0.
+1. ~~**MeshCore max text payload size**~~ **CLOSED — verified on hardware (Phase 1).** Spec documents 133 chars; direct (zero-hop) DMs measured intact at 140 and truncated at 141 — the budget shrinks with path length since MeshCore carries the route in the packet. Design: the send adapter hard-caps at **133** (multi-hop-safe floor). Push line is ~60 chars; no pressure.
 2. **True vs apparent wind** — on VESSEL, `directionTrue`/`speedOverGround` are fed from apparent values by path-mapper. Fix the mapping upstream or relabel the telemetry fields as apparent. Decide before release. (See 5.4.)
 3. **No real GNSS fix** — the only `navigation.position` observed was null-island from the Meshtastic node. Confirm a genuine GNSS source on the bus before relying on `pos` or position-out advert. (See 5.4.)
 4. **Digital-switching path structure** — actual switches are `electrical.switches.bank.0.<N>.state`, not the command's `electrical.switches.<name>.state` template. Make configurable. (See 5.4.)
@@ -406,11 +406,33 @@ One experienced engineer:
 6. **Stale-data policy** — max age before a field is omitted vs sent stale.
 7. **Regional LoRa duty-cycle / airtime limits** — confirm push interval stays within local regulations.
 8. **`meshcore.js` Node `engines`** — runs on Venus OS Large's bundled Node?
-9. **Companion link exclusivity** with concurrent phone/web clients.
-10. **Channel setup/secret handling** for the telemetry channel (creation, sharing with crew).
+9. **Companion link exclusivity** — resolved for the USB variant: canonical companion builds expose exactly one app transport (BLE / USB / WiFi are separate firmware images), so the serial port's single-owner semantics are the whole story. Two host processes opening the same port wedges the device's USB CDC (recovery: replug). The plugin must own the port exclusively and tolerate `EBUSY`. TCP-variant concurrency re-test deferred until/unless the WiFi build is used (Phase 5).
+10. **Channel setup/secret handling** — mechanism verified on hardware (Phase 1): `setChannel(idx, name, secret16)` creates a private channel; the 128-bit secret entered manually in the phone app joins crew to it. **Design requirement (upgraded from nicety):** telemetry must default to a dedicated private channel — the US-preset Public channel carries live regional traffic (multiple third-party operators observed during testing). The plugin should create/own its channel and surface the secret in config for crew distribution.
 11. **Upstream author intent** (`meri-imperiumi`) — raise an issue before forking.
 
 **Closed:** State of charge — confirmed present as `electrical.batteries.house.capacity.stateOfCharge` (ratio); now a first-class `SoC` field.
+
+---
+
+## 10. Phase 1 hardware-spike findings `[VERIFIED on hardware, 2026-06-09]`
+
+Test rig: Heltec WiFi LoRa 32 V4 (ESP32-S3 native USB CDC), canonical `companion_radio_usb` v1.16.0, meshcore.js v1.13.0 over `NodeJSSerialConnection`, peer = second board with BLE companion + phone app (SK-DEV2), US/Canada preset 910.525 MHz / BW 62.5 kHz / SF7 / CR5. Spike scripts in `spike/`.
+
+Protocol facts the implementation must honor:
+
+1. **ESM loading**: `await import('@liamcottle/meshcore.js')` from CommonJS works; all needed APIs present.
+2. **Clock**: device boots with a bogus RTC (1989/2024 observed) and loses sync on power-cycle. Call `syncDeviceTime()` on **every** connect. Wildly-wrong clocks can cause advert rejection.
+3. **Drain on connect**: messages received while no client is attached are queued on-device. The ingest layer must call `getWaitingMessages()` immediately after connect, then again on each `MsgWaiting (0x83)` push. Both paths verified.
+4. **Channel message format**: `channelMessage.text` arrives as `"SenderName: text"` — parse off the name prefix. Contact DMs carry no prefix; sender resolves via `findContactByPublicKeyPrefix()` (verified).
+5. **Lat/lon wire format is int32 microdegrees** and meshcore.js does **not** scale: `setAdvertLatLong(Math.round(lat*1e6), Math.round(lon*1e6))`; divide contact/selfInfo `advLat/advLon` by 1e6 on read (companion_protocol.md confirms).
+6. **Payload cap**: see Open #1 (closed) — hard-cap sends at 133 chars.
+7. **Send acks**: `sendTextMessage` resolves with `{result, expectedAckCrc, estTimeout}`; delivery confirmation arrives as a `SendConfirmed` push matching the CRC. Basis for ack semantics in the device adapter. `result` 1 = flood, 0 = direct-path send (shorter `estTimeout`).
+8. **Radio params survive power-cycle** (frequency/SF/BW/CR, name, channels persist; clock does not).
+9. **Channels**: channel info field is `name` (not `channelName`); "Public" pre-exists at idx 0 on fresh flash; 40 slots; `setChannel` with 16-byte secret verified end-to-end including phone join via manual hex entry.
+10. **Serial port is single-owner**: a second concurrent open wedges the device USB CDC until replug. Plugin must guarantee one connection and surface a clear error otherwise.
+11. **Live mesh courtesy**: the US-preset Public channel carries real regional traffic — telemetry default must be a dedicated private channel (Open #10).
+
+Firmware/ecosystem note: the MeshCore project split in April 2026 — canonical firmware is `github.com/meshcore-dev/MeshCore` (core team, incl. the meshcore.js author); `meshcore.co.uk`/MeshOS is a commercial downstream fork with unverified companion-protocol compatibility. This plugin targets canonical firmware. The canonical WiFi companion variant exists only as a source build (WiFi credentials are compile-time flags) — boat transport decision (USB into Cerbo vs. self-built WiFi image) deferred to Phase 5.
 
 ---
 
