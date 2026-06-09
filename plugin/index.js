@@ -267,12 +267,15 @@ module.exports = (app) => {
       if (!channel) {
         app.setPluginError(`Telemetry channel "${channelName}" not found on device`);
       } else {
+        const includeName = settings.telemetry.includeVesselName !== false;
         stopPush = startTelemetryPush({
           device,
           telemetry,
           channelIdx: channel.channelIdx,
           intervalMs: 60000 * (settings.telemetry.intervalMinutes || 10),
-          vesselName: settings.telemetry.vesselName || app.getSelfPath('name'),
+          vesselName: includeName
+            ? (settings.telemetry.vesselName || app.getSelfPath('name'))
+            : undefined,
           log: (s) => app.debug(s),
         });
       }
@@ -477,9 +480,14 @@ module.exports = (app) => {
               title: 'Push interval (minutes)',
               default: 10,
             },
+            includeVesselName: {
+              type: 'boolean',
+              title: 'Prefix the telemetry line with the vessel name',
+              default: true,
+            },
             vesselName: {
               type: 'string',
-              title: 'Vessel name tag for the telemetry line',
+              title: 'Vessel name tag for the telemetry line (defaults to the vessel name in Signal K)',
             },
             windSource: {
               type: 'string',
