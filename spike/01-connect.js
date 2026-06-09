@@ -31,6 +31,11 @@ async function main() {
       const time = await connection.getDeviceTime();
       console.log('--- device time ---');
       console.log(JSON.stringify(time), '(host time:', Math.floor(Date.now() / 1000), ')');
+      if (Math.abs(time.epochSecs - Date.now() / 1000) > 60) {
+        await connection.syncDeviceTime();
+        const synced = await connection.getDeviceTime();
+        console.log('clock was off, synced to:', JSON.stringify(synced));
+      }
 
       const contacts = await connection.getContacts();
       console.log(`--- contacts (${contacts.length}) ---`);
@@ -41,8 +46,8 @@ async function main() {
 
       const channels = await connection.getChannels();
       console.log(`--- channels (${channels.length}) ---`);
-      channels.forEach((ch) => {
-        console.log(`idx=${ch.channelIdx} name=${JSON.stringify(ch.channelName)}`);
+      channels.filter((ch) => ch.name).forEach((ch) => {
+        console.log(`idx=${ch.channelIdx} name=${JSON.stringify(ch.name)} secret=${Buffer.from(ch.secret).toString('hex').slice(0, 8)}…`);
       });
 
       await connection.close();
