@@ -42,17 +42,23 @@ function dispatch(msg, {
 
 function attachInbound(connection, Constants, deps) {
   const {
-    app, onContactMessage, onChannelMessage,
+    app, queue, onContactMessage, onChannelMessage,
   } = deps;
 
+  // Radio commands go through the queue one at a time; dispatch runs
+  // outside it (handlers send replies, which enqueue their own commands —
+  // holding the queue here would deadlock).
   async function drain() {
-    const waiting = await connection.getWaitingMessages();
+    const waiting = await queue.run(() => connection.getWaitingMessages(), 'getWaitingMessages');
     for (let i = 0; i < waiting.length; i += 1) {
       const m = waiting[i];
       if (m.contactMessage) {
         const cm = m.contactMessage;
         // eslint-disable-next-line no-await-in-loop
-        const contact = await connection.findContactByPublicKeyPrefix(cm.pubKeyPrefix);
+        const contact = await queue.run(
+          () => connection.findContactByPublicKeyPrefix(cm.pubKeyPrefix),
+          'findContact',
+        );
         if (!contact) {
           app.debug('Inbound DM from unknown contact, ignoring');
         } else {
@@ -62,6 +68,7 @@ function attachInbound(connection, Constants, deps) {
             data: cm.text,
             senderTimestamp: cm.senderTimestamp,
           };
+          app.debug(`Inbound DM from ${msg.fromName}: ${msg.data}`);
           if (onContactMessage) {
             onContactMessage(msg);
           }

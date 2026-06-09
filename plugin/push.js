@@ -10,6 +10,9 @@ function startTelemetryPush({
       if (line) {
         await device.sendChannelText(line, channelIdx);
         telemetry.clearWindHistory();
+        if (log) {
+          log(`telemetry push: ${line}`);
+        }
       }
     } catch (e) {
       if (log) {

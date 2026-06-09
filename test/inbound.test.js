@@ -3,6 +3,7 @@ const assert = require('node:assert');
 const { EventEmitter } = require('node:events');
 const { attachInbound, parseChannelText } = require('../plugin/inbound');
 const Telemetry = require('../plugin/telemetry');
+const CommandQueue = require('../plugin/queue');
 
 const Constants = { PushCodes: { MsgWaiting: 0x83 } };
 const CONTACT = {
@@ -37,6 +38,7 @@ function deps(extra = {}) {
     },
     app: mockApp(),
     telemetry: new Telemetry(),
+    queue: new CommandQueue(1000),
     ...extra,
   };
 }

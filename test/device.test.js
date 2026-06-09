@@ -1,6 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 const { makeDevice, clamp, MAX_TEXT } = require('../plugin/device');
+const CommandQueue = require('../plugin/queue');
 
 const Constants = { TxtTypes: { Plain: 0 } };
 
@@ -24,7 +25,7 @@ test('device adapter routes to meshcore.js calls with clamping', async () => {
       return Promise.resolve();
     },
   };
-  const device = makeDevice(connection, Constants);
+  const device = makeDevice(connection, Constants, new CommandQueue(1000));
   const key = Uint8Array.from(Buffer.alloc(32, 1));
 
   await device.sendText('hello', key);

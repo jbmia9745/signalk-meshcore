@@ -2,6 +2,7 @@ const { join } = require('path');
 
 const Telemetry = require('./telemetry');
 const NodeDb = require('./nodedb');
+const CommandQueue = require('./queue');
 const { makeDevice } = require('./device');
 const { attachInbound } = require('./inbound');
 const { startTelemetryPush } = require('./push');
@@ -18,9 +19,11 @@ module.exports = (app) => {
   let device;
   let telemetry;
   let nodeDb;
+  let queue;
   let stopPush;
   let retryTimer;
   let positionAdvertTimer;
+  let contactRefreshPending = false;
   let stopping = false;
   const unsubscribes = [];
 
@@ -101,7 +104,7 @@ module.exports = (app) => {
   }
 
   async function refreshContacts(settings) {
-    const contacts = await connection.getContacts();
+    const contacts = await queue.run(() => connection.getContacts(), 'getContacts');
     contacts.forEach((contact) => {
       const { key, node } = nodeDb.updateFromContact(contact);
       if (settings.communications && settings.communications.populate_vessels) {
@@ -110,6 +113,19 @@ module.exports = (app) => {
     });
     await nodeDb.save();
     setStatus(settings);
+  }
+
+  // Adverts arrive frequently on a busy mesh — coalesce refreshes.
+  function scheduleContactRefresh(settings) {
+    if (contactRefreshPending) {
+      return;
+    }
+    contactRefreshPending = true;
+    setTimeout(() => {
+      contactRefreshPending = false;
+      refreshContacts(settings)
+        .catch((e) => app.error(`Contact refresh failed: ${e.message}`));
+    }, 10000);
   }
 
   function subscribeSignalK(settings) {
@@ -204,23 +220,32 @@ module.exports = (app) => {
         return;
       }
       // wire format: int32 microdegrees (spec §10.5)
-      connection.setAdvertLatLong(Math.round(p.latitude * 1e6), Math.round(p.longitude * 1e6))
-        .then(() => connection.sendZeroHopAdvert())
+      queue.run(
+        () => connection.setAdvertLatLong(
+          Math.round(p.latitude * 1e6),
+          Math.round(p.longitude * 1e6),
+        ),
+        'setAdvertLatLong',
+      )
+        .then(() => queue.run(() => connection.sendZeroHopAdvert(), 'sendZeroHopAdvert'))
         .catch((e) => app.error(`Position advert failed: ${e.message}`));
     }, intervalMs);
   }
 
   async function onConnected(settings) {
     app.debug('Connected to MeshCore device');
-    await connection.syncDeviceTime(); // device clock is bogus after power-cycle (spec §10.2)
+    queue = new CommandQueue();
+    // device clock is bogus after power-cycle (spec §10.2)
+    await queue.run(() => connection.syncDeviceTime(), 'syncDeviceTime');
 
-    device = makeDevice(connection, meshcore.Constants);
+    device = makeDevice(connection, meshcore.Constants, queue);
 
     await attachInbound(connection, meshcore.Constants, {
       settings,
       device,
       app,
       telemetry,
+      queue,
       onChannelMessage: (m) => {
         app.debug(`Channel message [${m.channelIdx}] ${m.sender}: ${m.text}`);
       },
@@ -230,13 +255,15 @@ module.exports = (app) => {
 
     // new adverts (auto-add mode) → refresh contact list into DB
     connection.on(meshcore.Constants.PushCodes.Advert, () => {
-      refreshContacts(settings)
-        .catch((e) => app.error(`Contact refresh failed: ${e.message}`));
+      scheduleContactRefresh(settings);
     });
 
     if (settings.telemetry && settings.telemetry.enabled) {
       const channelName = settings.telemetry.channelName || 'BOAT-TELEM';
-      const channel = await connection.findChannelByName(channelName);
+      const channel = await queue.run(
+        () => connection.findChannelByName(channelName),
+        'findChannelByName',
+      );
       if (!channel) {
         app.setPluginError(`Telemetry channel "${channelName}" not found on device`);
       } else {

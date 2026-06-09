@@ -1,0 +1,75 @@
+{
+  "d7eb452a2f0c589bd8b6cb7716ab27c3436b251f8c04a342879dbae5fbc1a928": {
+    "name": "SK-DEV2",
+    "type": 1,
+    "seen": "2026-06-09T22:30:55.000Z"
+  },
+  "6d5065a06f9d2616f2a025f0a8f2d2a8fb3e1e6b928ff9b46c1711bda79d49e7": {
+    "name": "MIAMI TRON V4",
+    "type": 2,
+    "seen": "2026-06-09T22:33:37.000Z",
+    "advLat": 25.76744,
+    "advLon": -80.18443
+  },
+  "5c3a39cf57e24f2e7bce45bc720c8a03fd4c3accb9073f591eca11d34ac49d22": {
+    "name": "BOCA TRON V4",
+    "type": 2,
+    "seen": "2026-06-09T22:33:50.000Z",
+    "advLat": 26.36408,
+    "advLon": -80.17231
+  },
+  "8e73f5a4854964ac713b85c19944e8cfb61bf3a037896dbf006c1afdaaa6a0a6": {
+    "name": "CS TRON V4",
+    "type": 2,
+    "seen": "2026-06-09T22:43:12.000Z",
+    "advLat": 26.24053,
+    "advLon": -80.25474
+  },
+  "f4c1c99c69be11b7112ebcd3fde7be9ea31bab925513a4a49c603b0ed2408e83": {
+    "name": "KK4YG",
+    "type": 1,
+    "seen": "2026-06-09T22:46:45.000Z",
+    "advLat": 26.320927,
+    "advLon": -80.26723
+  },
+  "e632d4b5aaa24a5404f0ffab524455cf86410c870f45ff362fd5a2dd48095040": {
+    "name": "Panaman-RPR",
+    "type": 2,
+    "seen": "2024-10-04T10:52:38.000Z",
+    "advLat": 26.232833,
+    "advLon": -80.270279
+  },
+  "c5f96f307c08d771edd5586da2eba7aee24157b99215f35d5e58677607c953d8": {
+    "name": "PSL Repeater V4",
+    "type": 2,
+    "seen": "2024-06-07T13:46:22.000Z",
+    "advLat": 27.300518,
+    "advLon": -80.400053
+  },
+  "e2e95fb80327fcda48b7bc5971429bd808dd24d01e1d6a20fb48a8c412d8c5ad": {
+    "name": "442 Repeater",
+    "type": 2,
+    "seen": "2026-06-12T06:48:51.000Z",
+    "advLat": 26.386072,
+    "advLon": -80.0765
+  },
+  "65af6c10e0cdc747bdc439e4d48f860ca672e567f5960ab2c802c021aeb9da83": {
+    "name": "Dvynsoul T096 Base 🏚",
+    "type": 2,
+    "seen": "2024-05-15T11:02:45.000Z",
+    "advLat": 25.7773,
+    "advLon": -80.28884
+  },
+  "03586b965d2bb0f2971d015568208cbb4012f51849906044aa82f38cfcc8dadc": {
+    "name": "Dvynsoul-MC-L1Pro☠️",
+    "type": 1,
+    "seen": "2026-06-09T23:04:21.000Z"
+  },
+  "b634fa015528fcf0825721d306aeaeaf7d572835170cf8585eb8d7043ae1058e": {
+    "name": "POMP TRON V4",
+    "type": 2,
+    "seen": "2026-06-09T21:04:53.000Z",
+    "advLat": 26.22653,
+    "advLon": -80.12819
+  }
+}
