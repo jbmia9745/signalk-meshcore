@@ -20,6 +20,7 @@ module.exports = (app) => {
   let telemetry;
   let nodeDb;
   let queue;
+  let alertChannelIdx = null;
   let stopPush;
   let retryTimer;
   let positionAdvertTimer;
@@ -40,9 +41,17 @@ module.exports = (app) => {
       app.setPluginError(`Failed to load MeshCore library: ${e.message}`);
     });
 
+  // Synthetic MMSI for chartplotter display (populate_vessels): 98-prefix
+  // means "craft associated with a parent ship"; 7 digits derived stably
+  // from the node public key. Ported from upstream's nodeNum scheme.
+  function syntheticMmsi(nodeKey) {
+    const n = parseInt(nodeKey.slice(0, 8), 16) % 10000000;
+    return `98${String(n).padStart(7, '0')}`;
+  }
+
   // Context for a mesh node in the Signal K tree. Identity is the
   // contact public key (hex). Vessel association via "... DE CALLSIGN".
-  function getNodeContext(nodeKey, node) {
+  function getNodeContext(nodeKey, node, settings) {
     const callsign = NodeDb.callsignOf(node);
     if (callsign && app.signalk && app.signalk.root && app.signalk.root.vessels) {
       if (node.mmsi) {
@@ -59,11 +68,15 @@ module.exports = (app) => {
       }
       return null;
     }
+    if (settings.communications && settings.communications.populate_vessels) {
+      // Synthetic-MMSI vessel so chartplotters (Freeboard etc) draw it
+      return `vessels.urn:mrn:imo:mmsi:${syntheticMmsi(nodeKey)}`;
+    }
     return `meshcore.urn:meshcore:node:${nodeKey}`;
   }
 
-  function nodeToSignalK(nodeKey, node) {
-    const context = getNodeContext(nodeKey, node);
+  function nodeToSignalK(nodeKey, node, settings) {
+    const context = getNodeContext(nodeKey, node, settings);
     if (!context) {
       return null;
     }
@@ -77,8 +90,13 @@ module.exports = (app) => {
         value: { latitude: node.advLat, longitude: node.advLon },
       });
     }
-    if (context.indexOf('meshcore.urn') === 0) {
+    if (context.indexOf('meshcore.urn') === 0
+      || context.indexOf(':98') !== -1) {
+      // purely-mesh node: inject name (and synthetic mmsi) to "vesselify" it
       values.push({ path: '', value: { name: node.name } });
+      if (context.indexOf(':98') !== -1) {
+        values.push({ path: '', value: { mmsi: context.split(':').at(-1) } });
+      }
     }
     app.handleMessage('signalk-meshcore', {
       context,
@@ -90,7 +108,9 @@ module.exports = (app) => {
         },
       ],
     });
-    if (context.indexOf('vessels.urn:mrn:imo:mmsi:') === 0) {
+    if (context.indexOf('vessels.urn:mrn:imo:mmsi:') === 0
+      && context.indexOf(':98') === -1) {
+      // remember real-AIS associations only, not synthetic MMSIs
       node.mmsi = context.split(':').at(-1); // eslint-disable-line no-param-reassign
     }
     return context;
@@ -108,7 +128,7 @@ module.exports = (app) => {
     contacts.forEach((contact) => {
       const { key, node } = nodeDb.updateFromContact(contact);
       if (settings.communications && settings.communications.populate_vessels) {
-        nodeToSignalK(key, node);
+        nodeToSignalK(key, node, settings);
       }
     });
     await nodeDb.save();
@@ -192,10 +212,6 @@ module.exports = (app) => {
     if (!v.value || !v.value.state || ['alarm', 'emergency'].indexOf(v.value.state) === -1) {
       return;
     }
-    const crew = crewKeys(settings);
-    if (!crew.length) {
-      return;
-    }
     let text = v.value.message || v.path;
     if (v.path.indexOf('notifications.mob.') === 0 && v.value.position
       && Number.isFinite(v.value.position.latitude)) {
@@ -203,10 +219,15 @@ module.exports = (app) => {
       const p = v.value.position;
       text = `MOB! ${text} ${p.latitude.toFixed(5)},${p.longitude.toFixed(5)}`;
     }
+    const crew = crewKeys(settings);
     crew.reduce(
       (prev, member) => prev.then(() => device.sendText(text, member)),
       Promise.resolve(),
     ).catch((e) => app.error(`Failed to send alert: ${e.message}`));
+    if (alertChannelIdx !== null) {
+      device.sendChannelText(text, alertChannelIdx)
+        .catch((e) => app.error(`Failed to post alert to channel: ${e.message}`));
+    }
   }
 
   function startPositionAdverts(settings) {
@@ -257,6 +278,19 @@ module.exports = (app) => {
     connection.on(meshcore.Constants.PushCodes.Advert, () => {
       scheduleContactRefresh(settings);
     });
+
+    alertChannelIdx = null;
+    if (settings.communications && settings.communications.alert_channel_name) {
+      const alertChannel = await queue.run(
+        () => connection.findChannelByName(settings.communications.alert_channel_name),
+        'findAlertChannel',
+      );
+      if (alertChannel) {
+        alertChannelIdx = alertChannel.channelIdx;
+      } else {
+        app.error(`Alert channel "${settings.communications.alert_channel_name}" not found on device`);
+      }
+    }
 
     if (settings.telemetry && settings.telemetry.enabled) {
       const channelName = settings.telemetry.channelName || 'BOAT-TELEM';
@@ -448,6 +482,11 @@ module.exports = (app) => {
               type: 'boolean',
               title: 'Send alarm/emergency notifications to crew nodes',
               default: true,
+            },
+            alert_channel_name: {
+              type: 'string',
+              title: 'Also post alerts to this MeshCore channel (empty = off)',
+              default: '',
             },
             digital_switching: {
               type: 'boolean',

@@ -107,7 +107,11 @@ const feed = setInterval(() => {
         { path: 'environment.outside.relativeHumidity', value: j(0.6707, 0.01) },
         { path: 'environment.outside.pressure', value: j(101928, 40) },
         { path: 'environment.wind.directionTrue', value: j(0.506, 0.1) },
-        { path: 'environment.wind.speedOverGround', value: j(5.29, 1.5) },
+        // occasional gust well above the 2 kn threshold
+        {
+          path: 'environment.wind.speedOverGround',
+          value: Math.random() < 0.25 ? j(9.5, 1) : j(5.29, 1.5),
+        },
         { path: 'electrical.batteries.house.voltage', value: j(13.29, 0.05) },
         { path: 'electrical.batteries.house.current', value: j(-6.4, 0.8) },
         { path: 'electrical.batteries.house.capacity.stateOfCharge', value: 0.985 },

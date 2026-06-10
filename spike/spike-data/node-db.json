@@ -92,5 +92,17 @@
     "seen": "2026-06-09T23:31:18.000Z",
     "advLat": 26.296,
     "advLon": -80.24389
+  },
+  "7a2ff5a7b824a98452697cbe67d1f28713621fbd0cf0241ec51944fbb9db9063": {
+    "name": "STUART TRON V4",
+    "type": 2,
+    "seen": "2024-05-17T04:52:33.000Z",
+    "advLat": 27.1261,
+    "advLon": -80.31807
+  },
+  "5989ed2bceb3561365a3e5d24d3094ed56329a96249bf4d5791197fd216fd1a0": {
+    "name": "FSUcore1",
+    "type": 1,
+    "seen": "2026-06-09T23:49:33.000Z"
   }
 }
