@@ -119,3 +119,12 @@ test('full line stays within the 133-char send cap', () => {
   const line = t.buildLine('A-LONGISH-VESSEL-NAME');
   assert.ok(line.length <= 133, `line too long: ${line.length}`);
 });
+
+test('null-island positions are rejected', () => {
+  const t = new Telemetry();
+  t.update('navigation.position', { latitude: -1e-16, longitude: -1e-16 });
+  assert.strictEqual(t.position, null);
+  t.update('navigation.position', { latitude: 25.724, longitude: -80.158 });
+  t.update('navigation.position', { latitude: -1e-7, longitude: -1e-7 });
+  assert.deepStrictEqual(t.position, { latitude: 25.724, longitude: -80.158 });
+});

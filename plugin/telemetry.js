@@ -38,7 +38,10 @@ class Telemetry {
 
   update(path, value) {
     if (path === 'navigation.position') {
-      if (value && Number.isFinite(value.latitude) && Number.isFinite(value.longitude)) {
+      if (value && Number.isFinite(value.latitude) && Number.isFinite(value.longitude)
+        // null island: GNSS sources without a fix report ~0,0 — never
+        // accept it (observed live: a second N2K source emitting -1e-16)
+        && (Math.abs(value.latitude) > 0.01 || Math.abs(value.longitude) > 0.01)) {
         this.position = value;
       }
       return;
