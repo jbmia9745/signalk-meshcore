@@ -22,7 +22,7 @@ This is a port of [signalk-meshtastic](https://github.com/meri-imperiumi/signalk
   - `companion_radio_usb` for USB serial (recommended; data + power over one cable), or
   - `companion_radio_wifi` for TCP — note this variant is a source build with WiFi credentials as compile-time flags; it is not in the release flasher.
   - The MeshOS fork's unified firmware is untested and unsupported.
-- **Node.js ≥ 22** (matches upstream signalk-meshtastic).
+- **Node.js ≥ 20** (validated on Venus OS's bundled Node 20; upstream signalk-meshtastic requires ≥ 22).
 - **Signal K paths**: telemetry reads the canonical paths `electrical.batteries.house.*`, `environment.outside.*`, `environment.wind.*`, `environment.depth.belowSurface`, `navigation.anchor.distanceFromBow`. On Venus OS and similar, these may only exist if [signalk-path-mapper](https://www.npmjs.com/package/signalk-path-mapper) (or equivalent) aliases the raw device-instance paths. The plugin never reads numeric battery instances — only `house`.
 
 ## Setup walkthrough
@@ -32,7 +32,7 @@ This is a port of [signalk-meshtastic](https://github.com/meri-imperiumi/signalk
 3. **Configure the connection**: transport `serial` + the device path (e.g. `/dev/ttyACM0` — the radio is native USB CDC), or `tcp` + host (port 5000).
 4. **Create a private telemetry channel**: never push telemetry to Public — it is a live regional channel. Create a named channel with a random 128-bit secret on the radio (the MeshCore web client over USB can do this, as can a short script; an in-plugin option is planned), enter the same name + secret on crew phones, and put the channel name in the plugin's telemetry settings.
 5. **Add crew**: have each crew phone send an advert; their node appears in the plugin's node picker. Assign role `crew`. Crew nodes can then use commands, and receive alerts.
-6. **Private crew positions** (optional): on each crew phone, open the SK-DEV contact's **permissions** and grant **telemetry** (including location). Enable `poll_crew_positions` in the plugin. Crew positions arrive encrypted and appear as vessels in Signal K — only nodes you've configured are plotted ("favorites only"), never the whole mesh.
+6. **Private crew positions** (optional): on each crew phone, open the boat radio's contact card → **permissions** and grant **telemetry** (including location). Enable `poll_crew_positions` in the plugin. Crew positions arrive encrypted and appear as vessels in Signal K — only nodes you've configured are plotted ("favorites only"), never the whole mesh.
 
 ## Telemetry line format
 
