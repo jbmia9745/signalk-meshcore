@@ -1,12 +1,29 @@
 const units = require('./units');
 
-function median(arr) {
-  if (!arr.length) {
-    return undefined;
+// WMO sustained-wind standard: speed is the mean over a rolling
+// 10-minute window; gust is the highest 3-second average within that
+// window (at our 1 Hz sampling, a 3-sample moving mean). Independent
+// of the push interval by design — an hourly push still reports
+// 10-minute wind, not an hour-long smear.
+const WIND_WINDOW_MS = 10 * 60000;
+const GUST_SAMPLES = 3;
+
+function mean(arr) {
+  return arr.reduce((a, b) => a + b, 0) / arr.length;
+}
+
+function maxGust(values) {
+  if (values.length <= GUST_SAMPLES) {
+    return Math.max(...values);
   }
-  const s = [...arr].sort((a, b) => a - b);
-  const mid = Math.floor(s.length / 2);
-  return s.length % 2 ? s[mid] : ((s[mid - 1] + s[mid]) / 2);
+  let best = -Infinity;
+  for (let i = 0; i + GUST_SAMPLES <= values.length; i += 1) {
+    const g = mean(values.slice(i, i + GUST_SAMPLES));
+    if (g > best) {
+      best = g;
+    }
+  }
+  return best;
 }
 
 // Which Signal K paths feed the wind segment. True wind renders as a
@@ -37,7 +54,7 @@ class Telemetry {
     this.wind = WIND_SOURCES[options.windSource] || WIND_SOURCES.true;
   }
 
-  update(path, value) {
+  update(path, value, at) {
     if (path === 'navigation.position') {
       if (value && Number.isFinite(value.latitude) && Number.isFinite(value.longitude)
         // null island: GNSS sources without a fix report ~0,0 — never
@@ -49,20 +66,32 @@ class Telemetry {
       return;
     }
     if (path === this.wind.speedPath) {
-      this.updateWindSpeed(value);
+      this.updateWindSpeed(value, at);
       return;
     }
     this.data[path] = value;
   }
 
-  updateWindSpeed(windSpeed) {
+  updateWindSpeed(windSpeed, at) {
     if (!Number.isFinite(windSpeed)) {
       return;
     }
     if (!this.data[this.wind.speedPath]) {
       this.data[this.wind.speedPath] = [];
     }
-    this.data[this.wind.speedPath].push(windSpeed);
+    this.data[this.wind.speedPath].push({ t: at || Date.now(), v: windSpeed });
+    this.pruneWind(at);
+  }
+
+  pruneWind(at) {
+    const buf = this.data[this.wind.speedPath];
+    if (!Array.isArray(buf)) {
+      return;
+    }
+    const cutoff = (at || Date.now()) - WIND_WINDOW_MS;
+    while (buf.length && buf[0].t < cutoff) {
+      buf.shift();
+    }
   }
 
   // Best available true heading: headingTrue if present, else
@@ -83,9 +112,7 @@ class Telemetry {
   //   { temp: '87.4F', humidity: '65%RH', pressure: '1019mb',
   //     wind: '27S(E) 8.2K G12.6K', depth: 'Depth 12.6FT Dist 98FT',
   //     batt: 'SOC 97% 13.3V +6.2A' }
-  // Non-destructive: reading does NOT clear the wind history — the push
-  // loop calls clearWindHistory() after a successful send so pull verbs
-  // can't blank the buffer.
+  // Reads are non-destructive; the wind buffer self-prunes by time.
   segments() {
     const d = this.data;
     const out = {};
@@ -101,14 +128,16 @@ class Telemetry {
     const dir = Number.isFinite(d[this.wind.directionPath])
       ? this.wind.formatDirection(d[this.wind.directionPath], this.trueHeading())
       : null;
+    this.pruneWind();
     const ws = d[this.wind.speedPath];
     let speed = null;
     if (Array.isArray(ws) && ws.length) {
-      const med = units.msToKn(median(ws));
-      const gust = units.msToKn(Math.max(...ws));
-      speed = `${med.toFixed(1)}k`;
-      // show the gust only when it meaningfully exceeds the median
-      if (gust >= med + 2) {
+      const values = ws.map((s) => s.v);
+      const sustained = units.msToKn(mean(values));
+      const gust = units.msToKn(maxGust(values));
+      speed = `${sustained.toFixed(1)}k`;
+      // show the gust only when it meaningfully exceeds the sustained wind
+      if (gust >= sustained + 2) {
         speed += ` gusts ${Math.round(gust)}k`;
       }
     }
@@ -157,10 +186,6 @@ class Telemetry {
       return null;
     }
     return name ? `${name} | ${body}` : body;
-  }
-
-  clearWindHistory() {
-    this.data[this.wind.speedPath] = [];
   }
 }
 

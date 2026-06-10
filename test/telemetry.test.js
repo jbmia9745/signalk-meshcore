@@ -54,28 +54,39 @@ test('wind renders with only one of direction/speed available', () => {
   assert.strictEqual(t.segments().wind, 'S 10.3k');
 });
 
-test('gusts appear when max meaningfully exceeds the median', () => {
+test('wind is WMO: 10-min mean, gust = max 3-sample average, shown when meaningful', () => {
   const t = new Telemetry();
-  // median 5.29 m/s ≈ 10.3 kn; gust 9 m/s ≈ 17.5 kn
-  [5.29, 5.1, 9.0].forEach((v) => t.update('environment.wind.speedOverGround', v));
-  assert.strictEqual(t.segments().wind, '10.3k gusts 17k');
-  t.update('environment.wind.directionTrue', 0.506);
-  assert.strictEqual(t.segments().wind, 'NE 10.3k gusts 17k');
+  const now = Date.now();
+  // 1 Hz samples: steady ~5.3 m/s with a 3-sample squall at 9 m/s
+  const samples = [5.3, 5.3, 5.3, 5.3, 9.0, 9.0, 9.0, 5.3, 5.3, 5.3];
+  samples.forEach((v, i) => t.update('environment.wind.speedOverGround', v, now - (samples.length - i) * 1000));
+  const sustainedKn = ((5.3 * 7 + 9.0 * 3) / 10) * 1.94384; // mean of the window
+  const gustKn = 9.0 * 1.94384; // best 3-sample average = the squall
+  const expected = `${sustainedKn.toFixed(1)}k gusts ${Math.round(gustKn)}k`;
+  assert.strictEqual(t.segments().wind, expected);
+  // reads are non-destructive
+  assert.strictEqual(t.segments().wind, expected);
+  // a single 1-second spike is NOT a WMO gust: the 3-sample average
+  // dilutes it below the display threshold (raw max would have shown)
+  const spiky = new Telemetry();
+  const spikySamples = Array(20).fill(5.0);
+  spikySamples[10] = 8.0;
+  spikySamples.forEach((v, i) => spiky.update('environment.wind.speedOverGround', v, now - (20 - i) * 1000));
+  assert.ok(!spiky.segments().wind.includes('gusts'), `spike should dilute: ${spiky.segments().wind}`);
   // steady wind → no gust shown
   const steady = new Telemetry();
-  [5.29, 5.3, 5.2].forEach((v) => steady.update('environment.wind.speedOverGround', v));
-  assert.strictEqual(steady.segments().wind, '10.3k');
+  [5.29, 5.3, 5.2].forEach((v, i) => steady.update('environment.wind.speedOverGround', v, now - (3 - i) * 1000));
+  assert.ok(!steady.segments().wind.includes('gusts'));
 });
 
-test('wind speed accumulates and reads as median, non-destructively', () => {
+test('wind samples older than 10 minutes fall out of the window', () => {
   const t = new Telemetry();
-  [2, 10, 4].forEach((v) => t.update('environment.wind.speedOverGround', v));
-  const expected = `${(4 * 1.94384).toFixed(1)}k gusts ${Math.round(10 * 1.94384)}k`;
-  assert.strictEqual(t.segments().wind, expected);
-  // second read still works (read does not clear)
-  assert.strictEqual(t.segments().wind, expected);
-  t.clearWindHistory();
-  assert.strictEqual(t.segments().wind, undefined);
+  const now = Date.now();
+  // a gale 11 minutes ago must not influence the current reading
+  t.update('environment.wind.speedOverGround', 25.0, now - 11 * 60000);
+  t.update('environment.wind.speedOverGround', 5.0, now - 2000);
+  t.update('environment.wind.speedOverGround', 5.0, now - 1000);
+  assert.strictEqual(t.segments().wind, `${(5.0 * 1.94384).toFixed(1)}k`);
 });
 
 test('anchor distance joins the depth segment when anchored', () => {

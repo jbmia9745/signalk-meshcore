@@ -54,7 +54,7 @@ Fields with no data are omitted.
 
 `42S(E) 7.5k gusts 11k` reads: apparent wind 42° off the bow on the **s**tarboard side, blowing from the **E**ast (8-point compass), 7.5 knots, gusting 11.
 
-- **Speed** is the **median** of 1-second samples accumulated since the last successful push — i.e. over one push interval (default 15 minutes). **Gusts** is the maximum sample in that same window, shown only when it exceeds the median by ≥ 2 kn. The buffer clears only after a successful push; the `wx` pull verb reads it non-destructively.
+- **Measurement follows the WMO standard** and is independent of the push interval: **speed** is the mean of 1-second samples over a rolling **10-minute** window; **gusts** is the highest **3-second average** within that window, shown only when it exceeds the sustained speed by ≥ 2 kn (a single 1-second spike doesn't qualify). Pushes and pull verbs both read the same rolling window, so an hourly push still reports 10-minute wind, not an hour-long smear.
 - The **compass point in parentheses** places the bow-relative apparent angle on the compass rose using the vessel's heading (`headingTrue`, or `headingMagnetic` + variation). At rest (mooring/anchor, no boat speed) apparent wind equals true wind, so the point is exact; under way it is an estimate. Without a heading source the segment degrades to `42S 7.5k`.
 - `windSource` is configurable: `apparent` (above) or `true`, which renders compass-point-first: `E 7.5k gusts 11k`. Pick whichever your boat's paths genuinely carry — on many setups `directionTrue` is mislabeled apparent data; check before trusting it.
 

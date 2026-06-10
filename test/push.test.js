@@ -19,7 +19,7 @@ function mockDevice(failures = 0) {
   };
 }
 
-test('push sends a line per tick and clears wind history after send', async (t) => {
+test('push sends a line per tick; wind window survives the send', async (t) => {
   t.mock.timers.enable({ apis: ['setInterval'] });
   const telemetry = new Telemetry();
   telemetry.update('environment.wind.speedOverGround', 5.29);
@@ -34,18 +34,18 @@ test('push sends a line per tick and clears wind history after send', async (t) 
   assert.strictEqual(device.sent.length, 1);
   assert.strictEqual(device.sent[0].text, 'VESSEL | 10.3k');
   assert.strictEqual(device.sent[0].channelIdx, 1);
-  // wind history cleared after the successful send
-  assert.strictEqual(telemetry.segments().wind, undefined);
+  // WMO rolling window: the send does NOT clear wind history
+  assert.strictEqual(telemetry.segments().wind, '10.3k');
 
-  // nothing left to send → no message next tick
+  // still data → sends again next tick
   t.mock.timers.tick(1000);
   await new Promise((resolve) => { setImmediate(resolve); });
-  assert.strictEqual(device.sent.length, 1);
+  assert.strictEqual(device.sent.length, 2);
 
   stop();
   t.mock.timers.tick(5000);
   await new Promise((resolve) => { setImmediate(resolve); });
-  assert.strictEqual(device.sent.length, 1);
+  assert.strictEqual(device.sent.length, 2);
 });
 
 test('failed send keeps wind history and logs', async (t) => {

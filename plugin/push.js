@@ -1,6 +1,6 @@
 // Telemetry push loop: one compact line to the configured channel per
-// interval. Wind history is cleared only after a successful send so the
-// pull verbs never see a blanked buffer (spec §6.2 behavior note).
+// interval. Wind is a rolling WMO 10-minute window (see telemetry.js)
+// and is unaffected by sends.
 function startTelemetryPush({
   device, telemetry, channelIdx, intervalMs, vesselName, log,
 }) {
@@ -9,7 +9,6 @@ function startTelemetryPush({
       const line = telemetry.buildLine(vesselName);
       if (line) {
         await device.sendChannelText(line, channelIdx);
-        telemetry.clearWindHistory();
         if (log) {
           log(`telemetry push: ${line}`);
         }
