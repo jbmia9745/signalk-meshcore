@@ -2,7 +2,7 @@
 
 Signal K plugin for interfacing with the [MeshCore](https://meshcore.io/) LoRa mesh network.
 
-**Status: feature-complete in desk testing; on-boat validation pending before first npm release.**
+**Status: validated live aboard (Venus OS / Cerbo GX, real N2K data, multi-hour field testing); multi-day soak in progress before first npm release.**
 
 Connects a Signal K server to a MeshCore Companion radio over USB serial or TCP/WiFi, providing:
 
@@ -10,9 +10,10 @@ Connects a Signal K server to a MeshCore Companion radio over USB serial or TCP/
   `VESSEL | 87.4F | 65%RH | 1019mb | 42S(E) 7.5k gusts 11k | Depth 12.6FT Dist 98FT | SOC 97% 13.3V +6.2A`
 - **Pull verbs** — DM the boat `wx`, `batt`, `pos`, `depth`, `status`, `help`, or `ping` and get an answer.
 - **Digital switching** — crew DM `turn <switch> on|off`, with switch names mapped to real Signal K paths (N2K bank paths supported).
-- **Alerts** — Signal K `alarm`/`emergency` notifications go to crew as DMs and optionally to a channel. MOB notifications degrade to a text alert with lat/lon (MeshCore has no waypoints).
+- **Alerts** — Signal K `alarm`/`emergency` notifications go to crew as DMs and optionally to a channel (field-measured at ~25 ms from notification to radio). `normal`-state clears are deliberately not forwarded. MOB notifications degrade to a text alert with lat/lon (MeshCore has no waypoints).
 - **Crew positions, privately** — the plugin polls crew nodes' telemetry (encrypted, contact-to-contact) and plots them as vessels in Signal K/Freeboard. No broadcast of crew location required.
-- **Boat position out** — vessel GNSS position published via MeshCore adverts so crew find the boat on the MeshCore app map.
+- **Boat position out, two ways** — broadcast via MeshCore adverts (optional, off by default), or privacy-first: leave the broadcast off and grant individual contacts telemetry permission on the radio, so only they can pull the boat's location.
+- **Radio GNSS fallback** — with a GPS module on the radio, the plugin detects a stale boat position source and transparently fills `navigation.position` from the radio's own GNSS (field-tested across a real 66-minute GPS outage), handing back automatically when the boat source returns.
 
 This is a port of [signalk-meshtastic](https://github.com/meri-imperiumi/signalk-meshtastic) by Henri Bergius (GPLv3) to the MeshCore platform, using [meshcore.js](https://github.com/meshcore-dev/meshcore.js) (MIT). It is a re-platform, not a transport swap: MeshCore's contact-based routing replaces packet subscriptions, identity is keyed on public keys, and native structured telemetry is replaced by bot-style text (the MeshCore companion protocol has no host-injected telemetry — verified against firmware v1.16 source).
 
@@ -50,6 +51,14 @@ Pipe-delimited, self-describing units, max 133 chars (the multi-hop-safe MeshCor
 
 Fields with no data are omitted.
 
+### The three name knobs (don't conflate them)
+
+| What | Where set | What it affects |
+|---|---|---|
+| **Node name** (e.g. `DDRM:` before channel messages) | on the radio (MeshCore setting) | sender attribution the protocol prepends to every channel message — not removable by the plugin |
+| **Vessel name** (the optional line prefix) | plugin settings: "Include vessel name" + name field | the telemetry line body. Checkbox off = no name. Checkbox on with an **empty** name field falls back to the Signal K server's vessel name — set the field explicitly if those differ |
+| **Channel name** (e.g. `Vessel_Comm`) | on the radio (and as a local label on each phone) | which channel the plugin pushes to (`channelName` must match the radio's). Channels are *identified by their secret* — names are local labels, so renaming on one device doesn't break others |
+
 ### Wind: how to read it, and the measurement window
 
 `42S(E) 7.5k gusts 11k` reads: apparent wind 42° off the bow on the **s**tarboard side, blowing from the **E**ast (8-point compass), 7.5 knots, gusting 11.
@@ -81,6 +90,12 @@ Validated live on a Cerbo GX (Venus OS v3.73 Large, Signal K 2.19.1, Node 20, He
 - The companion serial protocol is strict request/response; the plugin serializes all radio commands internally with timeouts (do not be alarmed by occasional `radio command timed out` debug lines on a busy mesh — the queue recovers).
 - Host USB suspend (e.g. a laptop dev rig going to sleep) can leave the serial connection open but dead, with no disconnect event. The plugin detects this — 5 consecutive command timeouts force a reconnect — but the radio's USB interface can also wedge hard enough to need a physical replug. On a desk rig, prevent host sleep (`caffeinate` on macOS); on Venus OS this doesn't apply.
 - Repeater relaying in MeshCore is a firmware role, not a per-contact behavior; the plugin needs no routing configuration. A masthead repeater node is a good way to bridge a below-decks radio to the wider mesh.
+
+## Known issues / not yet implemented
+
+- **Restart connect-churn**: each plugin/server restart can produce one or two quick disconnect/reconnect cycles (~35 s apart) before the session settles. Self-healing, under investigation (suspected ESP32 auto-reset on serial port close).
+- **Digital switching** ships disabled with an empty switch map — mapping friendly names to your real switch-bank paths (and verifying the bank accepts PUTs) is a per-boat commissioning step.
+- **In-plugin channel management** (create/rename channels from settings) is planned; today the channel must exist on the radio with the configured name.
 
 ## On-boat validation checklist (pre-release)
 
