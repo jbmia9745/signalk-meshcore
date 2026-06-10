@@ -172,7 +172,7 @@ module.exports = (app) => {
       {
         context: 'vessels.self',
         subscribe: [
-          { path: 'navigation.position', period: 600000 },
+          { path: 'navigation.position', period: 60000 },
           { path: 'notifications.*', policy: 'instant' },
           { path: 'environment.outside.temperature', period: 1000 },
           { path: 'environment.outside.relativeHumidity', period: 1000 },
@@ -344,9 +344,10 @@ module.exports = (app) => {
       return;
     }
     const intervalMs = 60000 * (settings.communications.position_interval_minutes || 30);
-    positionAdvertTimer = setInterval(() => {
+    const tick = () => {
       const p = telemetry.position;
       if (!p || !Number.isFinite(p.latitude)) {
+        app.debug('Position advert skipped: no vessel position yet');
         return;
       }
       // wire format: int32 microdegrees (spec §10.5)
@@ -358,8 +359,13 @@ module.exports = (app) => {
         'setAdvertLatLong',
       )
         .then(() => queue.run(() => connection.sendZeroHopAdvert(), 'sendZeroHopAdvert'))
+        .then(() => app.debug(`Position advert sent: ${p.latitude},${p.longitude}`))
         .catch((e) => app.error(`Position advert failed: ${e.message}`));
-    }, intervalMs);
+    };
+    positionAdvertTimer = setInterval(tick, intervalMs);
+    // first advert shortly after connect, once the position subscription
+    // has had a chance to deliver
+    setTimeout(tick, 90000).unref?.();
   }
 
   async function onConnected(settings) {
@@ -481,7 +487,15 @@ module.exports = (app) => {
           retryTimer = setTimeout(() => restart(settings), 30000);
         }, CONNECT_TIMEOUT_MS);
 
-        connection.on('connected', () => {
+        // capture this session's connection: a superseded session's late
+        // serial events (close straggling through USB teardown) must not
+        // kill the session that replaced it
+        const conn = connection;
+
+        conn.on('connected', () => {
+          if (conn !== connection) {
+            return;
+          }
           clearTimeout(connectTimeout);
           onConnected(settings).catch((e) => {
             // a failed startup leaves a half-initialized session — close
@@ -496,8 +510,8 @@ module.exports = (app) => {
           });
         });
 
-        connection.on('disconnected', () => {
-          if (stopping) {
+        conn.on('disconnected', () => {
+          if (stopping || conn !== connection) {
             return;
           }
           app.error('MeshCore device disconnected, restarting');
