@@ -124,11 +124,21 @@ module.exports = (app) => {
     );
   }
 
+  // "Favorites only": vesselify just the nodes the user has configured
+  // (crew/dinghy/onboard), or DE-callsign nodes that merge into real AIS
+  // targets — never the whole mesh.
+  function isConfiguredNode(keyHex, settings) {
+    return (settings.nodes || []).some(
+      (n) => n.publicKey && n.publicKey.toLowerCase() === keyHex,
+    );
+  }
+
   async function refreshContacts(settings) {
     const contacts = await queue.run(() => connection.getContacts(), 'getContacts');
     contacts.forEach((contact) => {
       const { key, node } = nodeDb.updateFromContact(contact);
-      if (settings.communications && settings.communications.populate_vessels) {
+      if (settings.communications && settings.communications.populate_vessels
+        && (isConfiguredNode(key, settings) || NodeDb.callsignOf(node))) {
         nodeToSignalK(key, node, settings);
       }
     });
@@ -546,7 +556,7 @@ module.exports = (app) => {
             },
             populate_vessels: {
               type: 'boolean',
-              title: 'Show position-sharing MeshCore nodes in Signal K (Freeboard etc)',
+              title: 'Show configured nodes (crew/dinghy/onboard) as vessels in Signal K (Freeboard etc)',
               default: false,
             },
             poll_crew_positions: {
