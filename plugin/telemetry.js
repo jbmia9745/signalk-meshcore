@@ -10,20 +10,22 @@ function median(arr) {
 }
 
 // Which Signal K paths feed the wind segment. True wind renders as a
-// compass bearing ("NE@9.6k"); apparent is a bow-relative angle and is
-// marked as such ("45S@9.6k(A)") to stay honest.
+// compass point ("E 8.2K"); apparent is a bow-relative angle ("27S"),
+// plus a heading-derived compass point in parens ("27S(E)") when the
+// vessel heading is known — exact at rest, an estimate under way.
 const WIND_SOURCES = {
   true: {
     directionPath: 'environment.wind.directionTrue',
     speedPath: 'environment.wind.speedOverGround',
     formatDirection: (rad) => units.radToPoint(rad),
-    suffix: '',
   },
   apparent: {
     directionPath: 'environment.wind.angleApparent',
     speedPath: 'environment.wind.speedApparent',
-    formatDirection: (rad) => units.radToBowAngle(rad),
-    suffix: '(A)',
+    formatDirection: (rad, heading) => {
+      const bow = units.radToBowAngle(rad);
+      return Number.isFinite(heading) ? `${bow}(${units.radToPoint(heading + rad)})` : bow;
+    },
   },
 };
 
@@ -58,9 +60,24 @@ class Telemetry {
     this.data[this.wind.speedPath].push(windSpeed);
   }
 
+  // Best available true heading: headingTrue if present, else
+  // headingMagnetic corrected by magneticVariation. Needed to place the
+  // apparent wind angle on the compass rose.
+  trueHeading() {
+    const d = this.data;
+    if (Number.isFinite(d['navigation.headingTrue'])) {
+      return d['navigation.headingTrue'];
+    }
+    if (Number.isFinite(d['navigation.headingMagnetic'])) {
+      return d['navigation.headingMagnetic'] + (d['navigation.magneticVariation'] || 0);
+    }
+    return undefined;
+  }
+
   // Human-readable segments, e.g.
-  //   { temp: '89F', humidity: '67%', pressure: '1019mb', wind: 'NE@10.3k',
-  //     depth: '14ft', soc: '99%soc', voltage: '13.3v', current: '-6.4a' }
+  //   { temp: '87.4F', humidity: '65%RH', pressure: '1019mb',
+  //     wind: '27S(E) 8.2K G12.6K', depth: 'Depth 12.6FT Dist 98FT',
+  //     batt: 'SOC 97% 13.3V +6.2A' }
   // Non-destructive: reading does NOT clear the wind history — the push
   // loop calls clearWindHistory() after a successful send so pull verbs
   // can't blank the buffer.
@@ -68,50 +85,52 @@ class Telemetry {
     const d = this.data;
     const out = {};
     if (Number.isFinite(d['environment.outside.temperature'])) {
-      out.temp = `${Math.round(units.kToF(d['environment.outside.temperature']))}F`;
+      out.temp = `${units.kToF(d['environment.outside.temperature']).toFixed(1)}F`;
     }
     if (Number.isFinite(d['environment.outside.relativeHumidity'])) {
-      out.humidity = `${Math.round(units.ratioToPct(d['environment.outside.relativeHumidity']))}%`;
+      out.humidity = `${Math.round(units.ratioToPct(d['environment.outside.relativeHumidity']))}%RH`;
     }
     if (Number.isFinite(d['environment.outside.pressure'])) {
       out.pressure = `${Math.round(units.paToMb(d['environment.outside.pressure']))}mb`;
     }
     const dir = Number.isFinite(d[this.wind.directionPath])
-      ? this.wind.formatDirection(d[this.wind.directionPath])
+      ? this.wind.formatDirection(d[this.wind.directionPath], this.trueHeading())
       : null;
     const ws = d[this.wind.speedPath];
     let speed = null;
     if (Array.isArray(ws) && ws.length) {
       const med = units.msToKn(median(ws));
       const gust = units.msToKn(Math.max(...ws));
-      speed = `${med.toFixed(1)}k`;
+      speed = `${med.toFixed(1)}K`;
       // show the gust only when it meaningfully exceeds the median
       if (gust >= med + 2) {
-        speed += ` g${gust.toFixed(1)}`;
+        speed += ` G${gust.toFixed(1)}K`;
       }
     }
-    if (dir && speed) {
-      out.wind = `${dir}@${speed}${this.wind.suffix}`;
-    } else if (speed) {
-      out.wind = `${speed} wind${this.wind.suffix}`;
-    } else if (dir) {
-      out.wind = `${dir} wind${this.wind.suffix}`;
+    if (dir || speed) {
+      out.wind = [dir, speed].filter(Boolean).join(' ');
     }
     if (Number.isFinite(d['environment.depth.belowSurface'])) {
-      out.depth = `dpt ${Math.round(units.mToFt(d['environment.depth.belowSurface']))}ft`;
+      out.depth = `Depth ${units.mToFt(d['environment.depth.belowSurface']).toFixed(1)}FT`;
+      if (Number.isFinite(d['navigation.anchor.distanceFromBow'])) {
+        out.depth += ` Dist ${Math.round(units.mToFt(d['navigation.anchor.distanceFromBow']))}FT`;
+      }
+    } else if (Number.isFinite(d['navigation.anchor.distanceFromBow'])) {
+      out.depth = `Dist ${Math.round(units.mToFt(d['navigation.anchor.distanceFromBow']))}FT`;
     }
-    if (Number.isFinite(d['navigation.anchor.distanceFromBow'])) {
-      out.anchor = `anc ${Math.round(units.mToFt(d['navigation.anchor.distanceFromBow']))}ft`;
-    }
+    const batt = [];
     if (Number.isFinite(d['electrical.batteries.house.capacity.stateOfCharge'])) {
-      out.soc = `${Math.round(units.ratioToPct(d['electrical.batteries.house.capacity.stateOfCharge']))}%soc`;
+      batt.push(`SOC ${Math.round(units.ratioToPct(d['electrical.batteries.house.capacity.stateOfCharge']))}%`);
     }
     if (Number.isFinite(d['electrical.batteries.house.voltage'])) {
-      out.voltage = `${d['electrical.batteries.house.voltage'].toFixed(1)}v`;
+      batt.push(`${d['electrical.batteries.house.voltage'].toFixed(1)}V`);
     }
     if (Number.isFinite(d['electrical.batteries.house.current'])) {
       const amps = d['electrical.batteries.house.current'];
-      out.current = `${amps > 0 ? '+' : ''}${amps.toFixed(1)}a`;
+      batt.push(`${amps > 0 ? '+' : ''}${amps.toFixed(1)}A`);
+    }
+    if (batt.length) {
+      out.batt = batt.join(' ');
     }
     return out;
   }
@@ -127,7 +146,7 @@ class Telemetry {
     const s = this.segments();
     const body = Telemetry.joinSegments(
       s,
-      ['temp', 'humidity', 'pressure', 'wind', 'depth', 'anchor', 'soc', 'voltage', 'current'],
+      ['temp', 'humidity', 'pressure', 'wind', 'depth', 'batt'],
     );
     if (!body) {
       return null;

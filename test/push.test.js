@@ -32,7 +32,7 @@ test('push sends a line per tick and clears wind history after send', async (t) 
   t.mock.timers.tick(1000);
   await new Promise((resolve) => { setImmediate(resolve); });
   assert.strictEqual(device.sent.length, 1);
-  assert.strictEqual(device.sent[0].text, 'VESSEL | 10.3k wind');
+  assert.strictEqual(device.sent[0].text, 'VESSEL | 10.3K');
   assert.strictEqual(device.sent[0].channelIdx, 1);
   // wind history cleared after the successful send
   assert.strictEqual(telemetry.segments().wind, undefined);
@@ -67,6 +67,6 @@ test('failed send keeps wind history and logs', async (t) => {
   t.mock.timers.tick(1000);
   await new Promise((resolve) => { setImmediate(resolve); });
   assert.strictEqual(device.sent.length, 1);
-  assert.strictEqual(device.sent[0].text, '10.3k wind');
+  assert.strictEqual(device.sent[0].text, '10.3K');
   stop();
 });

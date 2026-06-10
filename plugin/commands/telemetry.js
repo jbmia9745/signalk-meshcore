@@ -15,10 +15,10 @@ module.exports = {
         reply = join(['temp', 'humidity', 'pressure', 'wind']) || 'No wx data';
         break;
       case 'batt':
-        reply = join(['voltage', 'current', 'soc']) || 'No batt data';
+        reply = join(['batt']) || 'No batt data';
         break;
       case 'depth':
-        reply = join(['depth', 'anchor']) || 'No depth data';
+        reply = join(['depth']) || 'No depth data';
         break;
       case 'pos': {
         const p = telemetry.position;
