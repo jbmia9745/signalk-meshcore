@@ -33,6 +33,7 @@ class Telemetry {
   constructor(options = {}) {
     this.data = {};
     this.position = null;
+    this.positionAt = null; // ms timestamp of the last accepted position
     this.wind = WIND_SOURCES[options.windSource] || WIND_SOURCES.true;
   }
 
@@ -43,6 +44,7 @@ class Telemetry {
         // accept it (observed live: a second N2K source emitting -1e-16)
         && (Math.abs(value.latitude) > 0.01 || Math.abs(value.longitude) > 0.01)) {
         this.position = value;
+        this.positionAt = Date.now();
       }
       return;
     }

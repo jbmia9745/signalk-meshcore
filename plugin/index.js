@@ -29,6 +29,8 @@ module.exports = (app) => {
   let retryTimer;
   let positionAdvertTimer;
   let crewPollTimer;
+  let gnssFallbackTimer;
+  let selfInfo;
   let contactRefreshPending = false;
   let stopping = false;
   let restartPlugin;
@@ -295,6 +297,48 @@ module.exports = (app) => {
     }, intervalMs);
   }
 
+  // When the boat's own position source goes stale (GPS off, N2K fault),
+  // fall back to the radio's GNSS module via a local self-telemetry
+  // query — serial only, no airtime. Injected positions loop back
+  // through our subscription, so each successful poll refreshes the
+  // freshness clock and the next poll waits out the max-age again.
+  function startRadioGnssFallback(settings) {
+    const comms = settings.communications || {};
+    if (!comms.radio_gnss_fallback) {
+      return;
+    }
+    if (!selfInfo || !selfInfo.publicKey) {
+      app.error('Radio GNSS fallback disabled: could not read radio self info');
+      return;
+    }
+    const prefix = selfInfo.publicKey.slice(0, 6);
+    const maxAgeMs = 60000 * (comms.position_max_age_minutes || 5);
+    gnssFallbackTimer = setInterval(async () => {
+      if (telemetry.positionAt && (Date.now() - telemetry.positionAt) < maxAgeMs) {
+        return;
+      }
+      try {
+        const response = await device.getSelfTelemetry(prefix);
+        const parsed = meshcore.CayenneLpp.parse(response.lppSensorData);
+        const gps = parsed.find((item) => item.type === meshcore.CayenneLpp.LPP_GPS);
+        if (!gps || !Number.isFinite(gps.value.latitude)) {
+          return;
+        }
+        const pos = { latitude: gps.value.latitude, longitude: gps.value.longitude };
+        telemetry.update('navigation.position', pos);
+        if (telemetry.position !== pos) {
+          return; // rejected (null island — radio GPS has no fix yet)
+        }
+        app.handleMessage(plugin.id, {
+          updates: [{ values: [{ path: 'navigation.position', value: pos }] }],
+        });
+        app.debug(`Position from radio GNSS: ${pos.latitude},${pos.longitude}`);
+      } catch (e) {
+        app.debug(`Radio GNSS poll failed: ${e.message}`);
+      }
+    }, 60000);
+  }
+
   function startPositionAdverts(settings) {
     if (!settings.communications || !settings.communications.send_position) {
       return;
@@ -332,8 +376,14 @@ module.exports = (app) => {
     });
     // device clock is bogus after power-cycle (spec §10.2)
     await queue.run(() => connection.syncDeviceTime(), 'syncDeviceTime');
+    try {
+      selfInfo = await queue.run(() => connection.getSelfInfo(10000), 'getSelfInfo');
+    } catch (e) {
+      selfInfo = null;
+      app.debug(`getSelfInfo failed: ${e && e.message ? e.message : e}`);
+    }
 
-    device = makeDevice(connection, meshcore.Constants, queue);
+    device = makeDevice(connection, meshcore.Constants, queue, (s) => app.debug(s));
 
     await attachInbound(connection, meshcore.Constants, {
       settings,
@@ -392,6 +442,7 @@ module.exports = (app) => {
     subscribeSignalK(settings);
     startPositionAdverts(settings);
     startCrewPolling(settings);
+    startRadioGnssFallback(settings);
     setStatus(settings);
   }
 
@@ -476,6 +527,9 @@ module.exports = (app) => {
     }
     if (crewPollTimer) {
       clearInterval(crewPollTimer);
+    }
+    if (gnssFallbackTimer) {
+      clearInterval(gnssFallbackTimer);
     }
     if (stopPush) {
       stopPush();
@@ -593,6 +647,16 @@ module.exports = (app) => {
             crew_poll_interval_minutes: {
               type: 'integer',
               title: 'Crew position poll interval (minutes)',
+              default: 5,
+            },
+            radio_gnss_fallback: {
+              type: 'boolean',
+              title: 'Use the radio\'s own GNSS for vessel position when the boat source goes stale (requires a GPS module on the radio)',
+              default: false,
+            },
+            position_max_age_minutes: {
+              type: 'integer',
+              title: 'Boat position considered stale after (minutes)',
               default: 5,
             },
           },
