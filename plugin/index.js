@@ -430,7 +430,15 @@ module.exports = (app) => {
         connection.on('connected', () => {
           clearTimeout(connectTimeout);
           onConnected(settings).catch((e) => {
-            app.setPluginError(`Startup failed: ${e.message}`);
+            // a failed startup leaves a half-initialized session — close
+            // and retry like every other failure path, don't strand the plugin
+            app.setPluginError(`Startup failed: ${e.message}, retrying in 30s`);
+            if (connection) {
+              connection.close();
+            }
+            if (!stopping) {
+              retryTimer = setTimeout(() => restart(settings), 30000);
+            }
           });
         });
 
