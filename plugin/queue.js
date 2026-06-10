@@ -8,15 +8,25 @@
 const DEFAULT_TIMEOUT_MS = 15000;
 
 class CommandQueue {
-  constructor(timeoutMs) {
+  constructor(timeoutMs, { stallThreshold = 0, onStall } = {}) {
     this.timeoutMs = timeoutMs || DEFAULT_TIMEOUT_MS;
     this.tail = Promise.resolve();
+    // a timed-out command means no serial round-trip — N in a row means
+    // the connection is stale (e.g. USB suspend) and only a reconnect
+    // recovers it; any command that settles proves the link is alive
+    this.stallThreshold = stallThreshold;
+    this.onStall = onStall;
+    this.consecutiveTimeouts = 0;
   }
 
   run(fn, label) {
     const { timeoutMs } = this;
     const task = this.tail.then(() => new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
+        this.consecutiveTimeouts += 1;
+        if (this.onStall && this.consecutiveTimeouts === this.stallThreshold) {
+          this.onStall();
+        }
         reject(new Error(`radio command timed out${label ? `: ${label}` : ''}`));
       }, timeoutMs);
       Promise.resolve()
@@ -24,10 +34,12 @@ class CommandQueue {
         .then(
           (value) => {
             clearTimeout(timer);
+            this.consecutiveTimeouts = 0;
             resolve(value);
           },
           (err) => {
             clearTimeout(timer);
+            this.consecutiveTimeouts = 0;
             reject(err || new Error(`radio command failed${label ? `: ${label}` : ''}`));
           },
         );

@@ -45,3 +45,27 @@ test('a rejecting command (meshcore.js rejects with undefined) gets an Error', a
   );
   assert.strictEqual(await queue.run(() => 'ok'), 'ok');
 });
+
+test('onStall fires once after N consecutive timeouts', async () => {
+  let stalls = 0;
+  const queue = new CommandQueue(20, { stallThreshold: 3, onStall: () => { stalls += 1; } });
+  const hang = () => new Promise(() => {});
+  for (let i = 0; i < 4; i += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    await assert.rejects(queue.run(hang, `hung-${i}`), /timed out/);
+  }
+  assert.strictEqual(stalls, 1, 'onStall should fire exactly once at the threshold');
+});
+
+test('a settled command resets the stall counter', async () => {
+  let stalls = 0;
+  const queue = new CommandQueue(20, { stallThreshold: 2, onStall: () => { stalls += 1; } });
+  const hang = () => new Promise(() => {});
+  await assert.rejects(queue.run(hang), /timed out/);
+  // a command that settles (even rejecting) proves the link is alive
+  await assert.rejects(queue.run(() => Promise.reject(new Error('nak'))), /nak/);
+  await assert.rejects(queue.run(hang), /timed out/);
+  assert.strictEqual(stalls, 0, 'counter should reset on any settled command');
+  await assert.rejects(queue.run(hang), /timed out/);
+  assert.strictEqual(stalls, 1);
+});

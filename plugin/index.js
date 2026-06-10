@@ -12,6 +12,10 @@ let meshcore;
 
 const CONNECT_TIMEOUT_MS = 20000;
 const ONLINE_THRESHOLD_SECS = 60 * 60 * 2;
+// consecutive command timeouts before we declare the serial connection
+// stale (seen after host USB suspend: fd stays open, no traffic, no
+// 'disconnected' event) and force a reconnect
+const STALL_THRESHOLD = 5;
 
 module.exports = (app) => {
   const plugin = {};
@@ -27,6 +31,7 @@ module.exports = (app) => {
   let crewPollTimer;
   let contactRefreshPending = false;
   let stopping = false;
+  let restartPlugin;
   const unsubscribes = [];
 
   plugin.id = 'signalk-meshcore';
@@ -312,7 +317,16 @@ module.exports = (app) => {
 
   async function onConnected(settings) {
     app.debug('Connected to MeshCore device');
-    queue = new CommandQueue();
+    queue = new CommandQueue(undefined, {
+      stallThreshold: STALL_THRESHOLD,
+      onStall: () => {
+        if (stopping) {
+          return;
+        }
+        app.error(`Radio unresponsive (${STALL_THRESHOLD} consecutive command timeouts), reconnecting`);
+        restartPlugin();
+      },
+    });
     // device clock is bogus after power-cycle (spec §10.2)
     await queue.run(() => connection.syncDeviceTime(), 'syncDeviceTime');
 
@@ -385,6 +399,7 @@ module.exports = (app) => {
       return;
     }
     stopping = false;
+    restartPlugin = () => restart(settings);
     telemetry = new Telemetry({ windSource: (settings.telemetry || {}).windSource });
     nodeDb = new NodeDb(join(app.getDataDirPath(), 'node-db.json'), (s) => app.debug(s));
 
