@@ -471,6 +471,14 @@ module.exports = (app) => {
           app.setPluginError('No device address configured');
           return;
         }
+        // never start a new session with an old one possibly holding the
+        // port (same-process serial locks are not re-entrant)
+        if (connection) {
+          try {
+            connection.close();
+          } catch (e) { /* already closed */ }
+          connection = null;
+        }
         if (transport === 'serial') {
           connection = new meshcore.NodeJSSerialConnection(address);
         } else {
@@ -494,6 +502,12 @@ module.exports = (app) => {
 
         conn.on('connected', () => {
           if (conn !== connection) {
+            // superseded session finished opening late (meshcore.js
+            // close() is a no-op while open is in flight) — release the
+            // port or the live session can never lock it
+            try {
+              conn.close();
+            } catch (e) { /* already closed */ }
             return;
           }
           clearTimeout(connectTimeout);
