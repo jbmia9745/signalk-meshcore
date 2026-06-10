@@ -106,10 +106,10 @@ class Telemetry {
     if (Array.isArray(ws) && ws.length) {
       const med = units.msToKn(median(ws));
       const gust = units.msToKn(Math.max(...ws));
-      speed = `${med.toFixed(1)}K`;
+      speed = `${med.toFixed(1)}k`;
       // show the gust only when it meaningfully exceeds the median
       if (gust >= med + 2) {
-        speed += ` G${gust.toFixed(1)}K`;
+        speed += ` gusts ${Math.round(gust)}k`;
       }
     }
     if (dir || speed) {

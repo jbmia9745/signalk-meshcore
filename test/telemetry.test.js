@@ -20,7 +20,7 @@ test('buildLine renders the human pipe-delimited format', () => {
   t.update('environment.wind.speedOverGround', 5.29);
   assert.strictEqual(
     t.buildLine('VESSEL'),
-    'VESSEL | 88.7F | 67%RH | 1019mb | NE 10.3K | Depth 14.4FT | SOC 99% 13.3V -6.4A',
+    'VESSEL | 88.7F | 67%RH | 1019mb | NE 10.3k | Depth 14.4FT | SOC 99% 13.3V -6.4A',
   );
 });
 
@@ -36,14 +36,14 @@ test('apparent wind renders bow angle, plus compass point when heading known', (
   t.update('environment.wind.speedApparent', 5.29);
   // true-wind paths must be ignored in apparent mode
   t.update('environment.wind.directionTrue', 1.0);
-  assert.strictEqual(t.segments().wind, '29S 10.3K');
+  assert.strictEqual(t.segments().wind, '29S 10.3k');
   // with heading (magnetic + variation): 63.4°M − 7.0° = 56.4°T; +29° = 85.4° → E
   t.update('navigation.headingMagnetic', 1.1069);
   t.update('navigation.magneticVariation', -0.1223);
-  assert.strictEqual(t.segments().wind, '29S(E) 10.3K');
+  assert.strictEqual(t.segments().wind, '29S(E) 10.3k');
   // headingTrue wins over magnetic when present (due W puts wind at WNW→NW)
   t.update('navigation.headingTrue', (270 / 180) * Math.PI);
-  assert.strictEqual(t.segments().wind, '29S(NW) 10.3K');
+  assert.strictEqual(t.segments().wind, '29S(NW) 10.3k');
 });
 
 test('wind renders with only one of direction/speed available', () => {
@@ -51,26 +51,26 @@ test('wind renders with only one of direction/speed available', () => {
   t.update('environment.wind.directionTrue', Math.PI); // S
   assert.strictEqual(t.segments().wind, 'S');
   t.update('environment.wind.speedOverGround', 5.29);
-  assert.strictEqual(t.segments().wind, 'S 10.3K');
+  assert.strictEqual(t.segments().wind, 'S 10.3k');
 });
 
 test('gusts appear when max meaningfully exceeds the median', () => {
   const t = new Telemetry();
   // median 5.29 m/s ≈ 10.3 kn; gust 9 m/s ≈ 17.5 kn
   [5.29, 5.1, 9.0].forEach((v) => t.update('environment.wind.speedOverGround', v));
-  assert.strictEqual(t.segments().wind, '10.3K G17.5K');
+  assert.strictEqual(t.segments().wind, '10.3k gusts 17k');
   t.update('environment.wind.directionTrue', 0.506);
-  assert.strictEqual(t.segments().wind, 'NE 10.3K G17.5K');
+  assert.strictEqual(t.segments().wind, 'NE 10.3k gusts 17k');
   // steady wind → no gust shown
   const steady = new Telemetry();
   [5.29, 5.3, 5.2].forEach((v) => steady.update('environment.wind.speedOverGround', v));
-  assert.strictEqual(steady.segments().wind, '10.3K');
+  assert.strictEqual(steady.segments().wind, '10.3k');
 });
 
 test('wind speed accumulates and reads as median, non-destructively', () => {
   const t = new Telemetry();
   [2, 10, 4].forEach((v) => t.update('environment.wind.speedOverGround', v));
-  const expected = `${(4 * 1.94384).toFixed(1)}K G${(10 * 1.94384).toFixed(1)}K`;
+  const expected = `${(4 * 1.94384).toFixed(1)}k gusts ${Math.round(10 * 1.94384)}k`;
   assert.strictEqual(t.segments().wind, expected);
   // second read still works (read does not clear)
   assert.strictEqual(t.segments().wind, expected);
