@@ -234,34 +234,35 @@ module.exports = (app) => {
   // Pull crew positions via per-contact telemetry polls (encrypted,
   // contact-to-contact — requires the crew node to grant telemetry
   // permission to this node). LPP_GPS carries the position.
-  async function pollCrewPositions(settings) {
-    const crew = crewKeys(settings);
-    for (let i = 0; i < crew.length; i += 1) {
-      const key = crew[i];
-      const keyHex = Buffer.from(key).toString('hex');
-      let telemetryResponse;
-      try {
-        // eslint-disable-next-line no-await-in-loop
-        telemetryResponse = await queue.run(
-          () => connection.getTelemetry(key),
-          'getTelemetry',
-        );
-      } catch (e) {
-        app.debug(`Crew telemetry poll failed for ${keyHex.slice(0, 12)}: ${e.message}`);
-      }
-      if (telemetryResponse) {
-        const parsed = meshcore.CayenneLpp.parse(telemetryResponse.lppSensorData);
-        const gps = parsed.find((item) => item.type === meshcore.CayenneLpp.LPP_GPS);
-        const node = nodeDb.get(keyHex);
-        if (gps && node && Number.isFinite(gps.value.latitude)) {
-          node.advLat = gps.value.latitude;
-          node.advLon = gps.value.longitude;
-          node.seen = new Date();
-          nodeToSignalK(keyHex, node, settings);
-          app.debug(`Crew position from telemetry: ${node.name} ${gps.value.latitude},${gps.value.longitude}`);
-        }
-      }
+  async function pollOneCrewPosition(key, settings) {
+    const keyHex = Buffer.from(key).toString('hex');
+    let telemetryResponse;
+    try {
+      telemetryResponse = await queue.run(
+        () => connection.getTelemetry(key),
+        'getTelemetry',
+      );
+    } catch (e) {
+      app.debug(`Crew telemetry poll failed for ${keyHex.slice(0, 12)}: ${e.message}`);
+      return;
     }
+    const parsed = meshcore.CayenneLpp.parse(telemetryResponse.lppSensorData);
+    const gps = parsed.find((item) => item.type === meshcore.CayenneLpp.LPP_GPS);
+    const node = nodeDb.get(keyHex);
+    if (gps && node && Number.isFinite(gps.value.latitude)) {
+      node.advLat = gps.value.latitude;
+      node.advLon = gps.value.longitude;
+      node.seen = new Date();
+      nodeToSignalK(keyHex, node, settings);
+      app.debug(`Crew position from telemetry: ${node.name} ${gps.value.latitude},${gps.value.longitude}`);
+    }
+  }
+
+  async function pollCrewPositions(settings) {
+    await crewKeys(settings).reduce(
+      (prev, key) => prev.then(() => pollOneCrewPosition(key, settings)),
+      Promise.resolve(),
+    );
     await nodeDb.save();
   }
 
