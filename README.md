@@ -59,6 +59,7 @@ Fields with no data are omitted. Wind source is configurable (`true` or `apparen
 - Messages received while the server is down are queued on the radio and processed on the next connect.
 - The serial port is single-owner: while the plugin is connected, the MeshCore web client can't also use the radio (and vice versa). Two simultaneous owners can wedge the radio's USB until replugged.
 - The companion serial protocol is strict request/response; the plugin serializes all radio commands internally with timeouts (do not be alarmed by occasional `radio command timed out` debug lines on a busy mesh — the queue recovers).
+- Host USB suspend (e.g. a laptop dev rig going to sleep) can leave the serial connection open but dead, with no disconnect event. The plugin detects this — 5 consecutive command timeouts force a reconnect — but the radio's USB interface can also wedge hard enough to need a physical replug. On a desk rig, prevent host sleep (`caffeinate` on macOS); on Venus OS this doesn't apply.
 - Repeater relaying in MeshCore is a firmware role, not a per-contact behavior; the plugin needs no routing configuration. A masthead repeater node is a good way to bridge a below-decks radio to the wider mesh.
 
 ## On-boat validation checklist (pre-release)
