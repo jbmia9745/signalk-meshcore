@@ -436,6 +436,30 @@ Firmware/ecosystem note: the MeshCore project split in April 2026 — canonical 
 
 ---
 
+## 11. Phase 2–4 implementation findings `[VERIFIED on hardware + local Signal K server, 2026-06-09]`
+
+Phases 2–4 are complete: 41 unit tests, the plugin runs inside a real `signalk-server` (local dev instance, UDP delta feed standing in for the boat bus), full end-to-end demos against the radio + a phone peer over live RF.
+
+**Critical discovery — command serialization (`plugin/queue.js`).** The companion serial protocol is strict request/response, but meshcore.js matches responses to commands via *global* events. Two in-flight commands consume each other's responses and hang their promises forever. Observed live: on a busy mesh (8+ nodes, active Public channel), the first integrated run went deaf+mute after ~1 minute — the push loop, advert-triggered contact refreshes, and message drains had raced. Fix: every radio command runs through a FIFO queue, one in flight, 15 s timeout so a lost response skips the command instead of wedging the queue. Advert-triggered contact refreshes are debounced (10 s). This is a hard architectural requirement for any nontrivial meshcore.js host.
+
+**Resilience**: on connect timeout the half-open connection must be closed before retrying or the process locks itself out of the port. Serial open errors only emit `error` (never reject), so the plugin enforces its own connect timeout.
+
+**Telemetry format (user-driven redesign)**: cryptic field codes replaced by a human pipe-delimited line — `VESSEL | 89F | 67% | 1019mb | NE@10.3k g17.5 | dpt 14ft | anc 98ft | 99%soc | 13.3v | -6.4a`. Pressure in mb (not inHg); depth and anchor distance are separate labeled segments; current signed (+charging); gusts inline when ≥2 kn over the interval median; vessel-name prefix optional; apparent wind renders bow-relative with an `(A)` marker. Worst-case line length asserted ≤133 in tests.
+
+**Crew position via encrypted telemetry polls (new feature, replaces DM-parsing ideas).** The phone app exposes per-contact *permissions*; once a crew node grants telemetry to the boat node, `getTelemetry(publicKey)` returns CayenneLPP including `LPP_GPS` — verified live (phone GPS arrived contact-to-contact encrypted, no broadcast). The plugin polls configured crew on an interval (`poll_crew_positions`) and publishes them as Signal K vessels. This is the privacy-preserving alternative to advert-based positions.
+
+**Native telemetry injection — closed at firmware level.** `MyMesh.cpp` (companion v1.16): telemetry responses are built exclusively from the radio's own battery + physical sensors (`sensors.querySensors`); `CMD_SET_CUSTOM_VAR` sets sensor *settings*, not values. No host-injection command exists in the full command table (1–59). Possible future upstream PR (`CMD_SET_TELEMETRY_DATA`); bot text remains the boat-data channel.
+
+**Vessels = favorites only.** `populate_vessels` plots only configured nodes (crew/dinghy/onboard) and DE-callsign AIS matches — never the whole mesh (a regional scan put 18 repeaters in the vessel tree; filtered by design decision). Synthetic MMSIs use the 98-prefix scheme with 7 digits derived from the pubkey. Verified in Freeboard-SK.
+
+**Alerts**: crew DMs + optional channel post (`alert_channel_name`); MOB degrades to text with lat/lon as planned.
+
+**Routing facts confirmed for docs**: client/companion nodes never relay; repeater is a firmware role, relays for everyone, favorites have no routing effect (no `CLIENT_BASE` analog). Masthead-repeater topology documented for below-decks installs.
+
+**Remaining**: Phase 5 only (on-boat checklist in README). Plugin runs at `skdev/` against a local server for ongoing soak.
+
+---
+
 ## Appendix A — Publishing to the Signal K AppStore `[VERIFIED]`
 
 There is no registration portal or approval step. The Signal K AppStore is an index built from npm: published plugins become available in all existing Signal K server installations, with each server fetching the listing live (requires internet). Publishing the package to npm with the correct metadata is the entire process.
