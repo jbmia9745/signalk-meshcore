@@ -24,6 +24,7 @@ module.exports = (app) => {
   let stopPush;
   let retryTimer;
   let positionAdvertTimer;
+  let crewPollTimer;
   let contactRefreshPending = false;
   let stopping = false;
   const unsubscribes = [];
@@ -230,6 +231,51 @@ module.exports = (app) => {
     }
   }
 
+  // Pull crew positions via per-contact telemetry polls (encrypted,
+  // contact-to-contact — requires the crew node to grant telemetry
+  // permission to this node). LPP_GPS carries the position.
+  async function pollCrewPositions(settings) {
+    const crew = crewKeys(settings);
+    for (let i = 0; i < crew.length; i += 1) {
+      const key = crew[i];
+      const keyHex = Buffer.from(key).toString('hex');
+      let telemetryResponse;
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        telemetryResponse = await queue.run(
+          () => connection.getTelemetry(key),
+          'getTelemetry',
+        );
+      } catch (e) {
+        app.debug(`Crew telemetry poll failed for ${keyHex.slice(0, 12)}: ${e.message}`);
+      }
+      if (telemetryResponse) {
+        const parsed = meshcore.CayenneLpp.parse(telemetryResponse.lppSensorData);
+        const gps = parsed.find((item) => item.type === meshcore.CayenneLpp.LPP_GPS);
+        const node = nodeDb.get(keyHex);
+        if (gps && node && Number.isFinite(gps.value.latitude)) {
+          node.advLat = gps.value.latitude;
+          node.advLon = gps.value.longitude;
+          node.seen = new Date();
+          nodeToSignalK(keyHex, node, settings);
+          app.debug(`Crew position from telemetry: ${node.name} ${gps.value.latitude},${gps.value.longitude}`);
+        }
+      }
+    }
+    await nodeDb.save();
+  }
+
+  function startCrewPolling(settings) {
+    if (!settings.communications || !settings.communications.poll_crew_positions) {
+      return;
+    }
+    const intervalMs = 60000 * (settings.communications.crew_poll_interval_minutes || 5);
+    crewPollTimer = setInterval(() => {
+      pollCrewPositions(settings)
+        .catch((e) => app.error(`Crew poll failed: ${e.message}`));
+    }, intervalMs);
+  }
+
   function startPositionAdverts(settings) {
     if (!settings.communications || !settings.communications.send_position) {
       return;
@@ -317,6 +363,7 @@ module.exports = (app) => {
 
     subscribeSignalK(settings);
     startPositionAdverts(settings);
+    startCrewPolling(settings);
     setStatus(settings);
   }
 
@@ -389,6 +436,9 @@ module.exports = (app) => {
     }
     if (positionAdvertTimer) {
       clearInterval(positionAdvertTimer);
+    }
+    if (crewPollTimer) {
+      clearInterval(crewPollTimer);
     }
     if (stopPush) {
       stopPush();
@@ -497,6 +547,16 @@ module.exports = (app) => {
               type: 'boolean',
               title: 'Show position-sharing MeshCore nodes in Signal K (Freeboard etc)',
               default: false,
+            },
+            poll_crew_positions: {
+              type: 'boolean',
+              title: 'Poll crew nodes for position via telemetry requests (crew must grant telemetry permission to this node)',
+              default: false,
+            },
+            crew_poll_interval_minutes: {
+              type: 'integer',
+              title: 'Crew position poll interval (minutes)',
+              default: 5,
             },
           },
         },
