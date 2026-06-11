@@ -202,8 +202,16 @@ module.exports = (app) => {
           if (!u.values) {
             return;
           }
+          const src = String(u.$source || (u.source && u.source.label) || '');
           u.values.forEach((v) => {
             if (v.path === 'navigation.position') {
+              // ignore re-imports of our own position (e.g. a Venus GPS
+              // bridge echoing Signal K back) — they would make a dead
+              // position source look eternally fresh and disable the
+              // radio-GNSS fallback
+              if (src.indexOf('gps.signalk') !== -1 || src.indexOf(plugin.id) !== -1) {
+                return;
+              }
               telemetry.update(v.path, v.value);
               return;
             }
