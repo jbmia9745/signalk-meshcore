@@ -70,7 +70,7 @@ Fields with no data are omitted.
 
 ## Venus OS / Cerbo GX install notes
 
-Validated live on a Cerbo GX (Venus OS v3.73 Large, Signal K 2.19.1, Node 20, Heltec V4 on USB):
+Validated live on a Cerbo GX (Venus OS v3.73 Large, Signal K 2.19.1, Node 20). The boat node in the validated setup is a **Heltec V4 running `companion_radio_usb` firmware, plugged directly into the Cerbo GX's USB port** — one cable carries both power and data, no battery, no BLE/WiFi variant involved. The Cerbo's USB port powered the radio through the entire validation including transmit peaks (mind the TX brownout note below if you power it any other way):
 
 - **serial-starter will fight you for the radio.** Venus probes every new USB serial device with its own drivers (`gps-dbus`, `vedirect-interface`); two owners on the port wedge the radio. Tell it to ignore Espressif devices (vendor `303a`) before plugging the radio in:
   ```
