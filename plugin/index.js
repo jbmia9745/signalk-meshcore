@@ -285,7 +285,7 @@ module.exports = (app) => {
         'getTelemetry',
       );
     } catch (e) {
-      app.debug(`Crew telemetry poll failed for ${keyHex.slice(0, 12)}: ${e.message}`);
+      app.debug(`Crew telemetry poll failed for ${keyHex.slice(0, 12)}: ${e && e.message ? e.message : String(e)}`);
       return;
     }
     const parsed = meshcore.CayenneLpp.parse(telemetryResponse.lppSensorData);
