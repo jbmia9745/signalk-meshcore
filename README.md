@@ -84,6 +84,8 @@ Validated live on a Cerbo GX (Venus OS v3.73 Large, Signal K 2.19.1, Node 20, He
 
 ## Notes from hardware testing
 
+- **Underpowered USB causes TX brownouts** that masquerade as software bugs: the Heltec V4 draws ~1 A peaks when transmitting (more on the 28 dBm variant), and a weak supply (USB-A ports/cables especially) reboots the radio on every send. Symptoms: receive works fine, every ping/advert/send fails, companion apps throw BLE write exceptions mid-operation. Use a USB-C source that can actually deliver, or drop TX power to test. The same math applies when powering from a Cerbo GX data port — budget for the TX peak, not the idle draw.
+
 - The radio's clock is wrong after every power cycle; the plugin syncs it on every connect.
 - Messages received while the server is down are queued on the radio and processed on the next connect.
 - The serial port is single-owner: while the plugin is connected, the MeshCore web client can't also use the radio (and vice versa). Two simultaneous owners can wedge the radio's USB until replugged.
