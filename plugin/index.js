@@ -34,6 +34,7 @@ module.exports = (app) => {
   let contactRefreshPending = false;
   let stopping = false;
   let restartPlugin;
+  const alertHistory = new Map(); // path:state -> last sent ms (alert storm damper)
   const unsubscribes = [];
 
   plugin.id = 'signalk-meshcore';
@@ -233,6 +234,19 @@ module.exports = (app) => {
     if (!v.value || !v.value.state || ['alarm', 'emergency'].indexOf(v.value.state) === -1) {
       return;
     }
+    // Rate-limit repeats of the same condition (a flapping device alarm
+    // generated 259 channel posts in one night in the field). Keyed on
+    // path+state so an escalation still alerts immediately; MOB is never
+    // suppressed.
+    const isMob = v.path.indexOf('notifications.mob') === 0;
+    const cooldownMin = settings.communications.alert_cooldown_minutes;
+    const cooldownMs = 60000 * (cooldownMin === undefined ? 15 : cooldownMin);
+    const alertKey = `${v.path}:${v.value.state}`;
+    const lastSent = alertHistory.get(alertKey);
+    if (!isMob && cooldownMs > 0 && lastSent && (Date.now() - lastSent) < cooldownMs) {
+      return;
+    }
+    alertHistory.set(alertKey, Date.now());
     let text = v.value.message || v.path;
     if (v.path.indexOf('notifications.mob.') === 0 && v.value.position
       && Number.isFinite(v.value.position.latitude)) {
@@ -656,6 +670,11 @@ module.exports = (app) => {
               type: 'string',
               title: 'Also post alerts to this MeshCore channel (empty = off)',
               default: '',
+            },
+            alert_cooldown_minutes: {
+              type: 'integer',
+              title: 'Minimum minutes between repeats of the same alert (0 = send every one; escalations and MOB always send)',
+              default: 15,
             },
             digital_switching: {
               type: 'boolean',
