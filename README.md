@@ -19,7 +19,7 @@ This is a port of [signalk-meshtastic](https://github.com/meri-imperiumi/signalk
 
 ## Requirements
 
-- **Radio**: a MeshCore-supported LoRa board (developed and tested on Heltec WiFi LoRa 32 V4) flashed with **canonical MeshCore Companion firmware ≥ 1.15** from [flasher.meshcore.io](https://flasher.meshcore.io):
+- **Radio**: this plugin was developed and validated end-to-end on the **Heltec WiFi LoRa 32 V4** — boat radio, crew radios, masthead repeater, and the optional GNSS module were all V4 hardware, and every hardware note in this document (power budgets, GPS wiring, USB behavior) is V4-specific. Other MeshCore-supported boards should work over the same companion protocol, but they are **untested here**, and details like GPS support, BLE behavior, and TX current draw differ per board. If you don't want to debug hardware yourself, use the V4. Flash **canonical MeshCore Companion firmware ≥ 1.15** from [flasher.meshcore.io](https://flasher.meshcore.io):
   - `companion_radio_usb` for USB serial (recommended; data + power over one cable), or
   - `companion_radio_wifi` for TCP — note this variant is a source build with WiFi credentials as compile-time flags; it is not in the release flasher.
   - The MeshOS fork's unified firmware is untested and unsupported.
