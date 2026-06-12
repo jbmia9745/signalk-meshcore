@@ -24,10 +24,12 @@ function makeDevice(connection, Constants, queue, log) {
   };
   // Track end-to-end delivery of directed sends: the radio reports the
   // expected ack CRC at send time and pushes SendConfirmed when the
-  // recipient's ack arrives. Observational only — sends don't fail on a
-  // missing ack, but the log finally answers "did it get there?".
-  const trackDelivery = (sentResponse, kind) => {
-    if (!log || !sentResponse || !sentResponse.expectedAckCrc) {
+  // recipient's ack arrives. On a missed ack, onMiss (if given) fires —
+  // used for one automatic retry: marginal multi-hop links lose longer
+  // frames probabilistically (field data: 4-char pong delivered, 20-char
+  // batt reply lost twice on the same path minutes apart).
+  const trackDelivery = (sentResponse, kind, onMiss) => {
+    if (!sentResponse || !sentResponse.expectedAckCrc) {
       return sentResponse;
     }
     const crc = sentResponse.expectedAckCrc;
@@ -39,17 +41,41 @@ function makeDevice(connection, Constants, queue, log) {
       }
       connection.off(Constants.PushCodes.SendConfirmed, onConfirm);
       clearTimeout(timer);
-      log(`DELIVERED ${kind} (round trip ${push.roundTrip}ms)`);
+      if (log) {
+        log(`DELIVERED ${kind} (round trip ${push.roundTrip}ms)`);
+      }
     };
     timer = setTimeout(() => {
       connection.off(Constants.PushCodes.SendConfirmed, onConfirm);
-      log(`NO DELIVERY CONFIRMATION ${kind} (waited ${Math.round(waitMs / 1000)}s)`);
+      if (log) {
+        log(`NO DELIVERY CONFIRMATION ${kind} (waited ${Math.round(waitMs / 1000)}s)`);
+      }
+      if (onMiss) {
+        onMiss();
+      }
     }, waitMs);
     if (timer.unref) {
       timer.unref();
     }
     connection.on(Constants.PushCodes.SendConfirmed, onConfirm);
     return sentResponse;
+  };
+
+  const DM_RETRIES = 1;
+  const RETRY_GAP_MS = 2000;
+
+  const sendDm = (text, to, attempt) => {
+    note(attempt ? `dm retry ${attempt}` : 'dm', text);
+    return queue.run(
+      () => connection.sendTextMessage(to, clamp(text), Constants.TxtTypes.Plain),
+      'sendText',
+    ).then((sent) => trackDelivery(
+      sent,
+      attempt ? `dm retry ${attempt}` : 'dm',
+      attempt < DM_RETRIES
+        ? () => { setTimeout(() => sendDm(text, to, attempt + 1), RETRY_GAP_MS); }
+        : null,
+    ));
   };
 
   return {
@@ -84,13 +110,7 @@ function makeDevice(connection, Constants, queue, log) {
       }),
       'getSelfTelemetry',
     ),
-    sendText: (text, to) => {
-      note('dm', text);
-      return queue.run(
-        () => connection.sendTextMessage(to, clamp(text), Constants.TxtTypes.Plain),
-        'sendText',
-      ).then((sent) => trackDelivery(sent, 'dm'));
-    },
+    sendText: (text, to) => sendDm(text, to, 0),
     sendChannelText: (text, channelIdx) => {
       note(`ch${channelIdx}`, text);
       return queue.run(

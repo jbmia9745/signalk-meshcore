@@ -98,3 +98,35 @@ test('delivery confirmation is logged when the matching ack arrives', async () =
   assert.deepStrictEqual(logged, ['OUT dm: hi', 'DELIVERED dm (round trip 777ms)']);
   assert.strictEqual(listeners[Constants.PushCodes.SendConfirmed], undefined);
 });
+
+test('a missed delivery confirmation triggers exactly one retry', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const logged = [];
+  const listeners = {};
+  let sends = 0;
+  const connection = {
+    on: (code, fn) => { listeners[code] = fn; },
+    off: (code, fn) => { if (listeners[code] === fn) delete listeners[code]; },
+    sendTextMessage: () => {
+      sends += 1;
+      return Promise.resolve({ result: 0, expectedAckCrc: 100 + sends, estTimeout: 1000 });
+    },
+  };
+  const device = makeDevice(connection, Constants, new CommandQueue(60000), (s) => logged.push(s));
+  device.sendText('hello there', Uint8Array.from(Buffer.alloc(32, 1)));
+  await new Promise((r) => { setImmediate(r); }); await new Promise((r) => { setImmediate(r); });
+  assert.strictEqual(sends, 1);
+  // first attempt's ack never arrives -> timeout fires -> retry scheduled
+  t.mock.timers.tick(7000);
+  await new Promise((r) => { setImmediate(r); });
+  t.mock.timers.tick(2500);
+  await new Promise((r) => { setImmediate(r); }); await new Promise((r) => { setImmediate(r); });
+  assert.strictEqual(sends, 2, 'one retry transmitted');
+  // retry delivers
+  listeners[Constants.PushCodes.SendConfirmed]({ ackCode: 102, roundTrip: 1500 });
+  assert.ok(logged.some((l) => l.includes('DELIVERED dm retry 1')));
+  // retry of the retry must NOT happen even if its window had lapsed
+  t.mock.timers.tick(20000);
+  await new Promise((r) => { setImmediate(r); });
+  assert.strictEqual(sends, 2);
+});
