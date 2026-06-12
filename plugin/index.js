@@ -484,6 +484,16 @@ module.exports = (app) => {
       return;
     }
     stopping = false;
+    // Config sections are grouped for the UI (Telemetry / Alerts / DMs /
+    // Channel messages); internally everything still reads
+    // settings.communications. Grouped values win over legacy ones.
+    // eslint-disable-next-line no-param-reassign
+    settings.communications = {
+      ...(settings.communications || {}),
+      ...(settings.telemetry_features || {}),
+      ...(settings.alerts || {}),
+      ...(settings.dms || {}),
+    };
     restartPlugin = () => restart(settings);
     telemetry = new Telemetry({ windSource: (settings.telemetry || {}).windSource });
     nodeDb = new NodeDb(join(app.getDataDirPath(), 'node-db.json'), (s) => app.debug(s));
@@ -658,9 +668,9 @@ module.exports = (app) => {
             },
           },
         },
-        communications: {
+        telemetry_features: {
           type: 'object',
-          title: 'Communications',
+          title: 'Telemetry',
           properties: {
             send_position: {
               type: 'boolean',
@@ -671,36 +681,6 @@ module.exports = (app) => {
               type: 'integer',
               title: 'Position advert interval (minutes)',
               default: 30,
-            },
-            send_alerts: {
-              type: 'boolean',
-              title: 'Send alarm/emergency notifications to crew nodes',
-              default: true,
-            },
-            alert_channel_name: {
-              type: 'string',
-              title: 'Also post alerts to this MeshCore channel (empty = off)',
-              default: '',
-            },
-            alert_cooldown_minutes: {
-              type: 'integer',
-              title: 'Minimum minutes between repeats of the same alert (0 = send every one; escalations and MOB always send)',
-              default: 15,
-            },
-            dm_retries: {
-              type: 'integer',
-              title: 'Automatic retries for unconfirmed direct messages (0 = no retries)',
-              default: 1,
-            },
-            dm_retry_gap_seconds: {
-              type: 'integer',
-              title: 'Seconds between retries (spacing rides out RF fade windows)',
-              default: 5,
-            },
-            reply_delay_seconds: {
-              type: 'integer',
-              title: 'Delay command replies (seconds) so they don\'t collide with the inbound exchange\'s RF wake on multi-hop links (0 = reply immediately)',
-              default: 3,
             },
             digital_switching: {
               type: 'boolean',
@@ -734,9 +714,51 @@ module.exports = (app) => {
             },
           },
         },
+        alerts: {
+          type: 'object',
+          title: 'Alerts',
+          properties: {
+            send_alerts: {
+              type: 'boolean',
+              title: 'Send alarm/emergency notifications to crew nodes',
+              default: true,
+            },
+            alert_channel_name: {
+              type: 'string',
+              title: 'Also post alerts to this MeshCore channel (empty = off)',
+              default: '',
+            },
+            alert_cooldown_minutes: {
+              type: 'integer',
+              title: 'Minimum minutes between repeats of the same alert (0 = send every one; escalations and MOB always send)',
+              default: 15,
+            },
+          },
+        },
+        dms: {
+          type: 'object',
+          title: 'Direct messages (DMs)',
+          properties: {
+            reply_delay_seconds: {
+              type: 'integer',
+              title: 'Hold command replies until the air has been quiet this many seconds (0 = reply immediately)',
+              default: 3,
+            },
+            dm_retries: {
+              type: 'integer',
+              title: 'Automatic retries for unconfirmed direct messages (0 = no retries)',
+              default: 1,
+            },
+            dm_retry_gap_seconds: {
+              type: 'integer',
+              title: 'Seconds between retries (spacing rides out RF fade windows)',
+              default: 5,
+            },
+          },
+        },
         telemetry: {
           type: 'object',
-          title: 'Telemetry bot',
+          title: 'Channel messages (telemetry push)',
           properties: {
             enabled: {
               type: 'boolean',
