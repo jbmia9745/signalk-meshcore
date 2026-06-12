@@ -23,7 +23,7 @@ This is a port of [signalk-meshtastic](https://github.com/meri-imperiumi/signalk
   - `companion_radio_usb` for USB serial (recommended; data + power over one cable), or
   - `companion_radio_wifi` for TCP — note this variant is a source build with WiFi credentials as compile-time flags; it is not in the release flasher.
   - The MeshOS fork's unified firmware is untested and unsupported.
-  - **Crew devices and repeaters can be any MeshCore hardware** — the plugin only ever sees them as mesh contacts, never touches their hardware. The validation boat's crew ran a RAK WisMesh Tag and a Heltec V4 interchangeably; the masthead repeater was a RAK4631.
+  - **Crew devices and repeaters can be any MeshCore hardware** — the plugin only ever sees them as mesh contacts, never touches their hardware. The validation boat's crew ran a RAK WisMesh Tag and a Heltec V4 interchangeably; the rig repeater was a RAK4631.
 - **Node.js ≥ 20** (validated on Venus OS's bundled Node 20; upstream signalk-meshtastic requires ≥ 22).
 - **Signal K paths**: telemetry reads the canonical paths `electrical.batteries.house.*`, `environment.outside.*`, `environment.wind.*`, `environment.depth.belowSurface`, `navigation.anchor.distanceFromBow`. On Venus OS and similar, these may only exist if [signalk-path-mapper](https://www.npmjs.com/package/signalk-path-mapper) (or equivalent) aliases the raw device-instance paths. The plugin never reads numeric battery instances — only `house`.
 
