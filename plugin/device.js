@@ -16,7 +16,10 @@ function clamp(text) {
   return text.length > MAX_TEXT ? text.slice(0, MAX_TEXT) : text;
 }
 
-function makeDevice(connection, Constants, queue, log) {
+function makeDevice(connection, Constants, queue, log, opts) {
+  const DM_RETRIES = (opts && opts.dmRetries !== undefined) ? opts.dmRetries : 1;
+  const RETRY_GAP_MS = 1000 * ((opts && opts.retryGapSeconds !== undefined)
+    ? opts.retryGapSeconds : 5);
   const note = (kind, text) => {
     if (log) {
       log(`OUT ${kind}: ${clamp(text)}`);
@@ -60,9 +63,6 @@ function makeDevice(connection, Constants, queue, log) {
     connection.on(Constants.PushCodes.SendConfirmed, onConfirm);
     return sentResponse;
   };
-
-  const DM_RETRIES = 1;
-  const RETRY_GAP_MS = 2000;
 
   const sendDm = (text, to, attempt) => {
     note(attempt ? `dm retry ${attempt}` : 'dm', text);

@@ -112,7 +112,9 @@ test('a missed delivery confirmation triggers exactly one retry', async (t) => {
       return Promise.resolve({ result: 0, expectedAckCrc: 100 + sends, estTimeout: 1000 });
     },
   };
-  const device = makeDevice(connection, Constants, new CommandQueue(60000), (s) => logged.push(s));
+  const device = makeDevice(connection, Constants, new CommandQueue(60000), (s) => logged.push(s), {
+    dmRetries: 1, retryGapSeconds: 2,
+  });
   device.sendText('hello there', Uint8Array.from(Buffer.alloc(32, 1)));
   await new Promise((r) => { setImmediate(r); }); await new Promise((r) => { setImmediate(r); });
   assert.strictEqual(sends, 1);

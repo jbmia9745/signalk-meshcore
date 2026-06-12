@@ -411,7 +411,10 @@ module.exports = (app) => {
       app.debug(`getSelfInfo failed: ${e && e.message ? e.message : e}`);
     }
 
-    device = makeDevice(connection, meshcore.Constants, queue, (s) => app.debug(s));
+    device = makeDevice(connection, meshcore.Constants, queue, (s) => app.debug(s), {
+      dmRetries: (settings.communications || {}).dm_retries,
+      retryGapSeconds: (settings.communications || {}).dm_retry_gap_seconds,
+    });
 
     await attachInbound(connection, meshcore.Constants, {
       settings,
@@ -683,6 +686,16 @@ module.exports = (app) => {
               type: 'integer',
               title: 'Minimum minutes between repeats of the same alert (0 = send every one; escalations and MOB always send)',
               default: 15,
+            },
+            dm_retries: {
+              type: 'integer',
+              title: 'Automatic retries for unconfirmed direct messages (0 = no retries)',
+              default: 1,
+            },
+            dm_retry_gap_seconds: {
+              type: 'integer',
+              title: 'Seconds between retries (spacing rides out RF fade windows)',
+              default: 5,
             },
             reply_delay_seconds: {
               type: 'integer',
