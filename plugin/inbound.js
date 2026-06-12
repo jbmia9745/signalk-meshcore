@@ -18,26 +18,42 @@ function parseChannelText(raw) {
 // that exchange's own RF wake (duplicate floods and ack echoes still
 // relaying between repeaters) and die at marginal multi-hop links —
 // field-verified: identical DMs failed at +50ms and delivered in 1.9s
-// when sent cold. Delay command replies to let the air clear.
-function delayedReplyDevice(device, settings) {
+// when sent cold. Replies therefore wait for QUIESCENCE: the air must
+// have been free of new inbound traffic for reply_delay_seconds before
+// a reply launches (each new inbound re-arms the hold — a burst of
+// commands no longer tramples the replies to its predecessors). Capped
+// so constant traffic can't starve a reply forever.
+const MAX_REPLY_HOLD_MS = 30000;
+
+function delayedReplyDevice(device, settings, airState) {
   const comms = settings.communications || {};
   const delayMs = 1000 * (comms.reply_delay_seconds === undefined ? 3 : comms.reply_delay_seconds);
   if (!delayMs) {
     return device;
   }
+  const air = airState || { lastInboundAt: Date.now() };
   return {
     ...device,
     sendText: (text, to) => new Promise((resolve, reject) => {
-      setTimeout(() => device.sendText(text, to).then(resolve, reject), delayMs);
+      const deadline = Date.now() + MAX_REPLY_HOLD_MS;
+      const attempt = () => {
+        const quietFor = Date.now() - air.lastInboundAt;
+        if (quietFor >= delayMs || Date.now() >= deadline) {
+          device.sendText(text, to).then(resolve, reject);
+        } else {
+          setTimeout(attempt, Math.min(delayMs - quietFor, MAX_REPLY_HOLD_MS));
+        }
+      };
+      setTimeout(attempt, delayMs);
     }),
   };
 }
 
 function dispatch(msg, {
-  settings, device, app, telemetry,
+  settings, device, app, telemetry, airState,
 }) {
   const fromCrew = commands.isFromCrew(msg, settings);
-  const replyDevice = delayedReplyDevice(device, settings);
+  const replyDevice = delayedReplyDevice(device, settings, airState);
   Object.keys(commands).forEach((cmd) => {
     if (cmd === 'isFromCrew') {
       return;
@@ -64,12 +80,19 @@ function attachInbound(connection, Constants, deps) {
   const {
     app, queue, onContactMessage, onChannelMessage,
   } = deps;
+  // shared "when did the air last carry inbound traffic" clock for the
+  // reply quiescence hold
+  const airState = { lastInboundAt: 0 };
+  const depsWithAir = { ...deps, airState };
 
   // Radio commands go through the queue one at a time; dispatch runs
   // outside it (handlers send replies, which enqueue their own commands —
   // holding the queue here would deadlock).
   async function drain() {
     const waiting = await queue.run(() => connection.getWaitingMessages(), 'getWaitingMessages');
+    if (waiting.length) {
+      airState.lastInboundAt = Date.now();
+    }
     for (let i = 0; i < waiting.length; i += 1) {
       const m = waiting[i];
       if (m.contactMessage) {
@@ -92,7 +115,7 @@ function attachInbound(connection, Constants, deps) {
           if (onContactMessage) {
             onContactMessage(msg);
           }
-          dispatch(msg, deps);
+          dispatch(msg, depsWithAir);
         }
       } else if (m.channelMessage && onChannelMessage) {
         const { sender, text } = parseChannelText(m.channelMessage.text);

@@ -28,8 +28,15 @@ module.exports = {
         break;
       }
       case 'status':
-      default:
-        reply = telemetry.buildLine((settings.telemetry || {}).vesselName) || 'No telemetry';
+      default: {
+        // honor the same include-vessel-name setting as the channel push
+        const t = settings.telemetry || {};
+        const includeName = t.includeVesselName !== false;
+        const name = includeName
+          ? (t.vesselName || (app && app.getSelfPath && app.getSelfPath('name')))
+          : undefined;
+        reply = telemetry.buildLine(name) || 'No telemetry';
+      }
     }
     return device.sendText(reply, msg.from);
   },

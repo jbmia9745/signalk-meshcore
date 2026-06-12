@@ -139,3 +139,47 @@ test('command replies are delayed to clear the inbound RF wake', async () => {
   assert.strictEqual(sent.length, 1);
   assert.ok(sent[0].at - t0 >= 45, 'reply held for the configured delay');
 });
+
+test('a new inbound re-arms the reply hold (quiescence)', async () => {
+  const { dispatch } = require('../plugin/inbound'); // eslint-disable-line global-require
+  const sent = [];
+  const device = {
+    sendText: (text) => { sent.push({ text, at: Date.now() }); return Promise.resolve({}); },
+  };
+  const app = { debug: () => {}, error: () => {} };
+  const airState = { lastInboundAt: Date.now() };
+  dispatch(
+    { from: Uint8Array.from(Buffer.alloc(32, 1)), data: 'ping' },
+    {
+      settings: { nodes: [], communications: { reply_delay_seconds: 0.08 } },
+      device,
+      app,
+      telemetry: null,
+      airState,
+    },
+  );
+  // simulate fresh inbound traffic arriving mid-hold: re-arms the timer
+  await new Promise((r) => { setTimeout(r, 50); });
+  airState.lastInboundAt = Date.now();
+  await new Promise((r) => { setTimeout(r, 50); });
+  assert.strictEqual(sent.length, 0, 'reply must stay held while air is busy');
+  await new Promise((r) => { setTimeout(r, 120); });
+  assert.strictEqual(sent.length, 1, 'reply launches once the air goes quiet');
+});
+
+test('status verb honors includeVesselName=false', async () => {
+  const commandsMod = require('../plugin/commands/index'); // eslint-disable-line global-require
+  const TelemetryClass = require('../plugin/telemetry'); // eslint-disable-line global-require
+  const telemetry = new TelemetryClass();
+  telemetry.update('electrical.batteries.house.voltage', 13.29);
+  const sent = [];
+  const device = { sendText: (text) => { sent.push(text); return Promise.resolve({}); } };
+  await commandsMod.telemetry.handle(
+    { from: Uint8Array.from(Buffer.alloc(32, 1)), data: 'status' },
+    { nodes: [], telemetry: { vesselName: 'SECRETBOAT', includeVesselName: false } },
+    device,
+    null,
+    telemetry,
+  );
+  assert.strictEqual(sent[0], '13.3V');
+});
