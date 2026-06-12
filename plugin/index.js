@@ -32,6 +32,8 @@ module.exports = (app) => {
   let gnssFallbackTimer;
   let selfInfo;
   let contactRefreshPending = false;
+  let anchorWatchActive = false;
+  let gnssDegradedAlarmRaised = false;
   let stopping = false;
   let restartPlugin;
   const alertHistory = new Map(); // path:state -> last sent ms (alert storm damper)
@@ -167,6 +169,36 @@ module.exports = (app) => {
     }, 10000);
   }
 
+  // The "anchor watch on backup GPS" guard: while an anchor watch is
+  // active and the radio's GNSS is what's feeding the position, warn the
+  // crew once (loudly) and poll the radio every 30s instead of the
+  // normal staleness cadence — a dragging boat shows in half a minute
+  // instead of five. Polling is serial-only; nothing extra on the air.
+  const DEGRADED_GPS_PATH = 'notifications.navigation.anchor.degradedGps';
+
+  function emitDegradedGpsState(state, message) {
+    app.handleMessage(plugin.id, {
+      updates: [{
+        values: [{
+          path: DEGRADED_GPS_PATH,
+          value: { state, method: ['visual', 'sound'], message },
+        }],
+      }],
+    });
+  }
+
+  function setAnchorWatch(active) {
+    if (anchorWatchActive === active) {
+      return;
+    }
+    anchorWatchActive = active;
+    app.debug(`Anchor watch ${active ? 'active' : 'cleared'}`);
+    if (!active && gnssDegradedAlarmRaised) {
+      gnssDegradedAlarmRaised = false;
+      emitDegradedGpsState('normal', 'Anchor watch cleared');
+    }
+  }
+
   function subscribeSignalK(settings) {
     const windPaths = telemetry.wind;
     app.subscriptionmanager.subscribe(
@@ -187,6 +219,7 @@ module.exports = (app) => {
           { path: 'electrical.batteries.house.current', period: 1000 },
           { path: 'electrical.batteries.house.capacity.stateOfCharge', period: 1000 },
           { path: 'navigation.anchor.distanceFromBow', period: 1000 },
+          { path: 'navigation.anchor.position', period: 5000 },
           { path: 'environment.depth.belowSurface', period: 1000 },
         ],
       },
@@ -204,6 +237,11 @@ module.exports = (app) => {
           }
           const src = String(u.$source || (u.source && u.source.label) || '');
           u.values.forEach((v) => {
+            if (v.path === 'navigation.anchor.position') {
+              // eslint-disable-next-line no-use-before-define
+              setAnchorWatch(!!(v.value && Number.isFinite(v.value.latitude)));
+              return;
+            }
             if (v.path === 'navigation.position') {
               // ignore re-imports of our own position (e.g. a Venus GPS
               // bridge echoing Signal K back) — they would make a dead
@@ -213,6 +251,11 @@ module.exports = (app) => {
                 return;
               }
               telemetry.update(v.path, v.value);
+              if (gnssDegradedAlarmRaised && telemetry.position === v.value) {
+                // a real (non-fallback) source is feeding position again
+                gnssDegradedAlarmRaised = false;
+                emitDegradedGpsState('normal', 'Boat GPS restored');
+              }
               return;
             }
             if (v.path.indexOf('notifications.') === 0) {
@@ -336,7 +379,10 @@ module.exports = (app) => {
     const prefix = selfInfo.publicKey.slice(0, 6);
     const maxAgeMs = 60000 * (comms.position_max_age_minutes || 5);
     gnssFallbackTimer = setInterval(async () => {
-      if (telemetry.positionAt && (Date.now() - telemetry.positionAt) < maxAgeMs) {
+      // anchored: any position older than 30s is too old; otherwise the
+      // configured staleness applies
+      const ageGate = anchorWatchActive ? 30000 : maxAgeMs;
+      if (telemetry.positionAt && (Date.now() - telemetry.positionAt) < ageGate) {
         return;
       }
       try {
@@ -355,10 +401,15 @@ module.exports = (app) => {
           updates: [{ values: [{ path: 'navigation.position', value: pos }] }],
         });
         app.debug(`Position from radio GNSS: ${pos.latitude},${pos.longitude}`);
+        if (anchorWatchActive && !gnssDegradedAlarmRaised) {
+          gnssDegradedAlarmRaised = true;
+          emitDegradedGpsState('alarm', 'Anchor watch is using backup radio GPS '
+            + '(updates every 30s, ~11m accuracy) - turn on the boat GPS');
+        }
       } catch (e) {
         app.debug(`Radio GNSS poll failed: ${e.message}`);
       }
-    }, 60000);
+    }, 30000);
   }
 
   function startPositionAdverts(settings) {
