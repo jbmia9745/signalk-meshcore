@@ -6,7 +6,7 @@ const CommandQueue = require('../plugin/queue');
 const Constants = {
   TxtTypes: { Plain: 0 },
   CommandCodes: { SendTelemetryReq: 39 },
-  PushCodes: { TelemetryResponse: 0x8b },
+  PushCodes: { TelemetryResponse: 0x8b, SendConfirmed: 0x82 },
 };
 
 test('clamp enforces the 133-char multi-hop-safe cap', () => {
@@ -80,4 +80,21 @@ test('getSelfTelemetry sends the 4-byte self frame and matches the self prefix',
   const self = await device.getSelfTelemetry(Uint8Array.from([1, 1, 1, 1, 1, 1]));
   assert.deepStrictEqual(Array.from(sentFrame), [39, 0, 0, 0]);
   assert.deepStrictEqual(Array.from(self.lppSensorData), [2]);
+});
+
+test('delivery confirmation is logged when the matching ack arrives', async () => {
+  const logged = [];
+  const listeners = {};
+  const connection = {
+    on: (code, fn) => { listeners[code] = fn; },
+    off: (code, fn) => { if (listeners[code] === fn) delete listeners[code]; },
+    sendTextMessage: () => Promise.resolve({ result: 0, expectedAckCrc: 1234, estTimeout: 5000 }),
+  };
+  const device = makeDevice(connection, Constants, new CommandQueue(1000), (s) => logged.push(s));
+  await device.sendText('hi', Uint8Array.from(Buffer.alloc(32, 1)));
+  // unrelated ack must be ignored, matching ack logs delivery
+  listeners[Constants.PushCodes.SendConfirmed]({ ackCode: 9999, roundTrip: 1 });
+  listeners[Constants.PushCodes.SendConfirmed]({ ackCode: 1234, roundTrip: 777 });
+  assert.deepStrictEqual(logged, ['OUT dm: hi', 'DELIVERED dm (round trip 777ms)']);
+  assert.strictEqual(listeners[Constants.PushCodes.SendConfirmed], undefined);
 });

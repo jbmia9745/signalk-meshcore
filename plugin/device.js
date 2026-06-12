@@ -22,6 +22,36 @@ function makeDevice(connection, Constants, queue, log) {
       log(`OUT ${kind}: ${clamp(text)}`);
     }
   };
+  // Track end-to-end delivery of directed sends: the radio reports the
+  // expected ack CRC at send time and pushes SendConfirmed when the
+  // recipient's ack arrives. Observational only — sends don't fail on a
+  // missing ack, but the log finally answers "did it get there?".
+  const trackDelivery = (sentResponse, kind) => {
+    if (!log || !sentResponse || !sentResponse.expectedAckCrc) {
+      return sentResponse;
+    }
+    const crc = sentResponse.expectedAckCrc;
+    const waitMs = (sentResponse.estTimeout || 10000) + 5000;
+    let timer;
+    const onConfirm = (push) => {
+      if (push.ackCode !== crc) {
+        return; // someone else's ack
+      }
+      connection.off(Constants.PushCodes.SendConfirmed, onConfirm);
+      clearTimeout(timer);
+      log(`DELIVERED ${kind} (round trip ${push.roundTrip}ms)`);
+    };
+    timer = setTimeout(() => {
+      connection.off(Constants.PushCodes.SendConfirmed, onConfirm);
+      log(`NO DELIVERY CONFIRMATION ${kind} (waited ${Math.round(waitMs / 1000)}s)`);
+    }, waitMs);
+    if (timer.unref) {
+      timer.unref();
+    }
+    connection.on(Constants.PushCodes.SendConfirmed, onConfirm);
+    return sentResponse;
+  };
+
   return {
     maxTextLength: MAX_TEXT,
     // The radio's own telemetry (battery + sensors incl. GPS when fitted).
@@ -59,7 +89,7 @@ function makeDevice(connection, Constants, queue, log) {
       return queue.run(
         () => connection.sendTextMessage(to, clamp(text), Constants.TxtTypes.Plain),
         'sendText',
-      );
+      ).then((sent) => trackDelivery(sent, 'dm'));
     },
     sendChannelText: (text, channelIdx) => {
       note(`ch${channelIdx}`, text);
