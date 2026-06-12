@@ -34,6 +34,9 @@ module.exports = (app) => {
   let contactRefreshPending = false;
   let anchorWatchActive = false;
   let gnssDegradedAlarmRaised = false;
+  let lastPositionWasFallback = false;
+  let gpsLostAlarmRaised = false;
+  let anchorGpsWatchTimer;
   let stopping = false;
   let restartPlugin;
   const alertHistory = new Map(); // path:state -> last sent ms (alert storm damper)
@@ -205,7 +208,7 @@ module.exports = (app) => {
       {
         context: 'vessels.self',
         subscribe: [
-          { path: 'navigation.position', period: 60000 },
+          { path: 'navigation.position', period: 5000 },
           { path: 'notifications.*', policy: 'instant' },
           { path: 'environment.outside.temperature', period: 1000 },
           { path: 'environment.outside.relativeHumidity', period: 1000 },
@@ -251,10 +254,13 @@ module.exports = (app) => {
                 return;
               }
               telemetry.update(v.path, v.value);
-              if (gnssDegradedAlarmRaised && telemetry.position === v.value) {
-                // a real (non-fallback) source is feeding position again
-                gnssDegradedAlarmRaised = false;
-                emitDegradedGpsState('normal', 'Boat GPS restored');
+              if (telemetry.position === v.value) {
+                lastPositionWasFallback = false;
+                if (gnssDegradedAlarmRaised) {
+                  // a real (non-fallback) source is feeding position again
+                  gnssDegradedAlarmRaised = false;
+                  emitDegradedGpsState('normal', 'Boat GPS restored');
+                }
               }
               return;
             }
@@ -367,6 +373,48 @@ module.exports = (app) => {
   // query — serial only, no airtime. Injected positions loop back
   // through our subscription, so each successful poll refreshes the
   // freshness clock and the next poll waits out the max-age again.
+  // Source-aware GPS-lost watchdog for anchor watch: boat GPS reports
+  // every second, so >20s of silence while anchored means it died —
+  // alarm fast. On the backup radio GPS (30s cadence) the same logic
+  // waits 90s. The anchoralarm plugin's own static watchdog stays at a
+  // permissive setting as the backstop.
+  const GPS_LOST_PATH = 'notifications.navigation.anchor.gpsLost';
+
+  function startAnchorGpsWatch() {
+    anchorGpsWatchTimer = setInterval(() => {
+      if (!anchorWatchActive || !telemetry.positionAt) {
+        return;
+      }
+      const age = Date.now() - telemetry.positionAt;
+      const threshold = lastPositionWasFallback ? 90000 : 20000;
+      if (age > threshold && !gpsLostAlarmRaised) {
+        gpsLostAlarmRaised = true;
+        app.handleMessage(plugin.id, {
+          updates: [{
+            values: [{
+              path: GPS_LOST_PATH,
+              value: {
+                state: 'emergency',
+                method: ['visual', 'sound'],
+                message: `GPS lost while anchored (no position for ${Math.round(age / 1000)}s)`,
+              },
+            }],
+          }],
+        });
+      } else if (age <= threshold && gpsLostAlarmRaised) {
+        gpsLostAlarmRaised = false;
+        app.handleMessage(plugin.id, {
+          updates: [{
+            values: [{
+              path: GPS_LOST_PATH,
+              value: { state: 'normal', method: [], message: 'GPS restored' },
+            }],
+          }],
+        });
+      }
+    }, 10000);
+  }
+
   function startRadioGnssFallback(settings) {
     const comms = settings.communications || {};
     if (!comms.radio_gnss_fallback) {
@@ -401,6 +449,7 @@ module.exports = (app) => {
           updates: [{ values: [{ path: 'navigation.position', value: pos }] }],
         });
         app.debug(`Position from radio GNSS: ${pos.latitude},${pos.longitude}`);
+        lastPositionWasFallback = true;
         if (anchorWatchActive && !gnssDegradedAlarmRaised) {
           gnssDegradedAlarmRaised = true;
           emitDegradedGpsState('alarm', 'Anchor watch is using backup radio GPS '
@@ -525,6 +574,7 @@ module.exports = (app) => {
     startPositionAdverts(settings);
     startCrewPolling(settings);
     startRadioGnssFallback(settings);
+    startAnchorGpsWatch();
     setStatus(settings);
   }
 
@@ -644,6 +694,9 @@ module.exports = (app) => {
     }
     if (gnssFallbackTimer) {
       clearInterval(gnssFallbackTimer);
+    }
+    if (anchorGpsWatchTimer) {
+      clearInterval(anchorGpsWatchTimer);
     }
     if (stopPush) {
       stopPush();
