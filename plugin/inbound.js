@@ -14,10 +14,30 @@ function parseChannelText(raw) {
   return { sender: raw.slice(0, sep), text: raw.slice(sep + 2) };
 }
 
+// Replies launched immediately after an inbound exchange collide with
+// that exchange's own RF wake (duplicate floods and ack echoes still
+// relaying between repeaters) and die at marginal multi-hop links —
+// field-verified: identical DMs failed at +50ms and delivered in 1.9s
+// when sent cold. Delay command replies to let the air clear.
+function delayedReplyDevice(device, settings) {
+  const comms = settings.communications || {};
+  const delayMs = 1000 * (comms.reply_delay_seconds === undefined ? 3 : comms.reply_delay_seconds);
+  if (!delayMs) {
+    return device;
+  }
+  return {
+    ...device,
+    sendText: (text, to) => new Promise((resolve, reject) => {
+      setTimeout(() => device.sendText(text, to).then(resolve, reject), delayMs);
+    }),
+  };
+}
+
 function dispatch(msg, {
   settings, device, app, telemetry,
 }) {
   const fromCrew = commands.isFromCrew(msg, settings);
+  const replyDevice = delayedReplyDevice(device, settings);
   Object.keys(commands).forEach((cmd) => {
     if (cmd === 'isFromCrew') {
       return;
@@ -29,7 +49,7 @@ function dispatch(msg, {
     if (!command.accept(msg, settings)) {
       return;
     }
-    command.handle(msg, settings, device, app, telemetry)
+    command.handle(msg, settings, replyDevice, app, telemetry)
       .then(() => {
         app.debug(`Message "${msg.data}" handled by command ${cmd}`);
       })

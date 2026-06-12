@@ -29,7 +29,7 @@ function deps(extra = {}) {
   const sent = [];
   return {
     sent,
-    settings: { nodes: [] },
+    settings: { nodes: [], communications: { reply_delay_seconds: 0 } },
     device: {
       sendText: (text, to) => {
         sent.push({ text, to });
@@ -111,4 +111,31 @@ test('unknown contact is ignored, channel messages are forwarded not dispatched'
   assert.deepStrictEqual(channelMsgs, [{
     channelIdx: 1, sender: 'SK-DEV2', text: 'ping', senderTimestamp: 2,
   }]);
+});
+
+test('command replies are delayed to clear the inbound RF wake', async () => {
+  const { dispatch } = require('../plugin/inbound'); // eslint-disable-line global-require
+  const sent = [];
+  const device = {
+    sendText: (text, to) => {
+      sent.push({ text, to, at: Date.now() });
+      return Promise.resolve({});
+    },
+  };
+  const app = { debug: () => {}, error: () => {} };
+  const t0 = Date.now();
+  dispatch(
+    { from: Uint8Array.from(Buffer.alloc(32, 1)), data: 'ping' },
+    {
+      settings: { nodes: [], communications: { reply_delay_seconds: 0.05 } },
+      device,
+      app,
+      telemetry: null,
+    },
+  );
+  await new Promise((r) => { setTimeout(r, 20); });
+  assert.strictEqual(sent.length, 0, 'reply must not go out inside the delay window');
+  await new Promise((r) => { setTimeout(r, 60); });
+  assert.strictEqual(sent.length, 1);
+  assert.ok(sent[0].at - t0 >= 45, 'reply held for the configured delay');
 });

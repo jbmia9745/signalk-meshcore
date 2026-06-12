@@ -684,6 +684,11 @@ module.exports = (app) => {
               title: 'Minimum minutes between repeats of the same alert (0 = send every one; escalations and MOB always send)',
               default: 15,
             },
+            reply_delay_seconds: {
+              type: 'integer',
+              title: 'Delay command replies (seconds) so they don\'t collide with the inbound exchange\'s RF wake on multi-hop links (0 = reply immediately)',
+              default: 3,
+            },
             digital_switching: {
               type: 'boolean',
               title: 'Allow crew to operate digital switching by message ("turn decklight on")',
