@@ -409,11 +409,14 @@ module.exports = (app) => {
   const GPS_LOST_PATH = 'notifications.navigation.anchor.gpsLost';
 
   function startAnchorGpsWatch() {
+    const watchStartedAt = Date.now();
     anchorGpsWatchTimer = setInterval(() => {
-      if (!anchorWatchActive || !telemetry.positionAt) {
+      if (!anchorWatchActive) {
         return;
       }
-      const age = Date.now() - telemetry.positionAt;
+      // no position EVER this session is the worst case, not a free pass:
+      // age from session start when positionAt is still null
+      const age = Date.now() - (telemetry.positionAt || watchStartedAt);
       const threshold = lastPositionWasFallback ? 90000 : 20000;
       if (age > threshold && !gpsLostAlarmRaised) {
         gpsLostAlarmRaised = true;
