@@ -228,13 +228,13 @@ module.exports = (app) => {
   }
 
   function emitDegradedGpsState(state, message) {
+    // per the Signal K spec, a cleared alarm is the notification set to
+    // null (state:'normal' would leave a lingering notification object)
+    const value = state === 'normal' || state === 'clear'
+      ? null
+      : { state, method: ['visual', 'sound'], message };
     app.handleMessage(plugin.id, {
-      updates: [{
-        values: [{
-          path: DEGRADED_GPS_PATH,
-          value: { state, method: ['visual', 'sound'], message },
-        }],
-      }],
+      updates: [{ values: [{ path: DEGRADED_GPS_PATH, value }] }],
     });
   }
 
@@ -432,17 +432,11 @@ module.exports = (app) => {
   const GPS_LOST_PATH = 'notifications.navigation.anchor.gpsLost';
 
   function emitGpsLostState(state, message) {
+    const value = state === 'normal' || state === 'clear'
+      ? null
+      : { state, method: ['visual', 'sound'], message };
     app.handleMessage(plugin.id, {
-      updates: [{
-        values: [{
-          path: GPS_LOST_PATH,
-          value: {
-            state,
-            method: state === 'normal' ? [] : ['visual', 'sound'],
-            message,
-          },
-        }],
-      }],
+      updates: [{ values: [{ path: GPS_LOST_PATH, value }] }],
     });
   }
 
