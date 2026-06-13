@@ -41,6 +41,28 @@ module.exports = (app) => {
   let stopping = false;
   let restartPlugin;
   const alertHistory = new Map(); // path:state -> last sent ms (alert storm damper)
+
+  function alertHistoryPath() {
+    return join(app.getDataDirPath(), 'alert-history.json');
+  }
+
+  function loadAlertHistory() {
+    try {
+      const data = JSON.parse(fs.readFileSync(alertHistoryPath(), 'utf8'));
+      const dayAgo = Date.now() - 86400000;
+      Object.keys(data).forEach((k) => {
+        if (data[k] > dayAgo) {
+          alertHistory.set(k, data[k]);
+        }
+      });
+    } catch (e) { /* first run */ }
+  }
+
+  function saveAlertHistory() {
+    try {
+      fs.writeFileSync(alertHistoryPath(), JSON.stringify(Object.fromEntries(alertHistory)));
+    } catch (e) { /* best effort */ }
+  }
   const unsubscribes = [];
 
   plugin.id = 'signalk-meshcore';
@@ -332,6 +354,7 @@ module.exports = (app) => {
       return;
     }
     alertHistory.set(alertKey, Date.now());
+    saveAlertHistory();
     let text = v.value.message || v.path;
     if (v.path.indexOf('notifications.mob.') === 0 && v.value.position
       && Number.isFinite(v.value.position.latitude)) {
@@ -408,6 +431,21 @@ module.exports = (app) => {
   // permissive setting as the backstop.
   const GPS_LOST_PATH = 'notifications.navigation.anchor.gpsLost';
 
+  function emitGpsLostState(state, message) {
+    app.handleMessage(plugin.id, {
+      updates: [{
+        values: [{
+          path: GPS_LOST_PATH,
+          value: {
+            state,
+            method: state === 'normal' ? [] : ['visual', 'sound'],
+            message,
+          },
+        }],
+      }],
+    });
+  }
+
   function startAnchorGpsWatch() {
     const watchStartedAt = Date.now();
     anchorGpsWatchTimer = setInterval(() => {
@@ -422,28 +460,13 @@ module.exports = (app) => {
       const threshold = lastPositionWasFallback ? 180000 : 20000;
       if (age > threshold && !gpsLostAlarmRaised) {
         gpsLostAlarmRaised = true;
-        app.handleMessage(plugin.id, {
-          updates: [{
-            values: [{
-              path: GPS_LOST_PATH,
-              value: {
-                state: 'emergency',
-                method: ['visual', 'sound'],
-                message: `GPS lost while anchored (no position for ${Math.round(age / 1000)}s)`,
-              },
-            }],
-          }],
-        });
+        emitGpsLostState(
+          'emergency',
+          `GPS lost while anchored (no position for ${Math.round(age / 1000)}s)`,
+        );
       } else if (age <= threshold && gpsLostAlarmRaised) {
         gpsLostAlarmRaised = false;
-        app.handleMessage(plugin.id, {
-          updates: [{
-            values: [{
-              path: GPS_LOST_PATH,
-              value: { state: 'normal', method: [], message: 'GPS restored' },
-            }],
-          }],
-        });
+        emitGpsLostState('normal', 'GPS restored');
       }
     }, 10000);
   }
@@ -630,7 +653,30 @@ module.exports = (app) => {
       ...(settings.dms || {}),
     };
     restartPlugin = () => restart(settings);
+    loadAlertHistory();
     gnssDegradedAlarmRaised = loadDegradedFlag();
+    if (gnssDegradedAlarmRaised) {
+      // restarts wipe the server's notification tree; re-assert so the
+      // server and client apps agree. The persisted alert cooldown keeps
+      // this from re-texting the crew.
+      emitDegradedGpsState('alarm', 'Anchor watch is using backup radio GPS '
+        + '(updates every 30s, ~11m accuracy) - turn on the boat GPS');
+    }
+    // our notification paths accept clears directly: a PUT of a new state
+    // is honored (acknowledgment), without re-announcing the episode
+    if (app.registerPutHandler) {
+      [[DEGRADED_GPS_PATH, emitDegradedGpsState], [GPS_LOST_PATH, emitGpsLostState]]
+        .forEach(([notifPath, emit]) => {
+          app.registerPutHandler(
+            'vessels.self',
+            `${notifPath}.state`,
+            (context, path, value) => {
+              emit(String(value), 'acknowledged');
+              return { state: 'COMPLETED', statusCode: 200 };
+            },
+          );
+        });
+    }
     telemetry = new Telemetry({ windSource: (settings.telemetry || {}).windSource });
     nodeDb = new NodeDb(join(app.getDataDirPath(), 'node-db.json'), (s) => app.debug(s));
 
