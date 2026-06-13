@@ -417,7 +417,9 @@ module.exports = (app) => {
       // no position EVER this session is the worst case, not a free pass:
       // age from session start when positionAt is still null
       const age = Date.now() - (telemetry.positionAt || watchStartedAt);
-      const threshold = lastPositionWasFallback ? 90000 : 20000;
+      // ~3 missed update cycles, not 1.5 — a 90s threshold flapped on
+      // routine cadence jitter in the field
+      const threshold = lastPositionWasFallback ? 180000 : 20000;
       if (age > threshold && !gpsLostAlarmRaised) {
         gpsLostAlarmRaised = true;
         app.handleMessage(plugin.id, {
@@ -460,7 +462,7 @@ module.exports = (app) => {
     gnssFallbackTimer = setInterval(async () => {
       // anchored: any position older than 30s is too old; otherwise the
       // configured staleness applies
-      const ageGate = anchorWatchActive ? 30000 : maxAgeMs;
+      const ageGate = anchorWatchActive ? 25000 : maxAgeMs;
       if (telemetry.positionAt && (Date.now() - telemetry.positionAt) < ageGate) {
         return;
       }
