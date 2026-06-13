@@ -675,6 +675,28 @@ module.exports = (app) => {
               return { state: 'COMPLETED', statusCode: 200 };
             },
           );
+          // apps silence by PUTting the method array (e.g. removing
+          // 'sound'); honor that too
+          app.registerPutHandler(
+            'vessels.self',
+            `${notifPath}.method`,
+            (context, path, value) => {
+              app.handleMessage(plugin.id, {
+                updates: [{
+                  values: [{
+                    path: notifPath,
+                    value: {
+                      state: notifPath === DEGRADED_GPS_PATH && gnssDegradedAlarmRaised
+                        ? 'alarm' : 'normal',
+                      method: Array.isArray(value) ? value : [],
+                      message: 'silenced',
+                    },
+                  }],
+                }],
+              });
+              return { state: 'COMPLETED', statusCode: 200 };
+            },
+          );
         });
     }
     telemetry = new Telemetry({ windSource: (settings.telemetry || {}).windSource });
