@@ -1,4 +1,5 @@
 const { join } = require('path');
+const fs = require('fs');
 
 const Telemetry = require('./telemetry');
 const NodeDb = require('./nodedb');
@@ -179,6 +180,31 @@ module.exports = (app) => {
   // instead of five. Polling is serial-only; nothing extra on the air.
   const DEGRADED_GPS_PATH = 'notifications.navigation.anchor.degradedGps';
 
+  // the "announced" flag survives restarts so one degraded episode is
+  // announced once, not once per server restart (field issue: plugin
+  // installs restart the server; each restart re-fired the alarm)
+  function degradedFlagPath() {
+    return join(app.getDataDirPath(), 'degraded-gps-announced');
+  }
+
+  function loadDegradedFlag() {
+    try {
+      return fs.existsSync(degradedFlagPath());
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function saveDegradedFlag(raised) {
+    try {
+      if (raised) {
+        fs.writeFileSync(degradedFlagPath(), '1');
+      } else if (fs.existsSync(degradedFlagPath())) {
+        fs.unlinkSync(degradedFlagPath());
+      }
+    } catch (e) { /* best effort */ }
+  }
+
   function emitDegradedGpsState(state, message) {
     app.handleMessage(plugin.id, {
       updates: [{
@@ -198,6 +224,7 @@ module.exports = (app) => {
     app.debug(`Anchor watch ${active ? 'active' : 'cleared'}`);
     if (!active && gnssDegradedAlarmRaised) {
       gnssDegradedAlarmRaised = false;
+      saveDegradedFlag(false);
       emitDegradedGpsState('normal', 'Anchor watch cleared');
     }
   }
@@ -259,6 +286,7 @@ module.exports = (app) => {
                 if (gnssDegradedAlarmRaised) {
                   // a real (non-fallback) source is feeding position again
                   gnssDegradedAlarmRaised = false;
+                  saveDegradedFlag(false);
                   emitDegradedGpsState('normal', 'Boat GPS restored');
                 }
               }
@@ -452,6 +480,7 @@ module.exports = (app) => {
         lastPositionWasFallback = true;
         if (anchorWatchActive && !gnssDegradedAlarmRaised) {
           gnssDegradedAlarmRaised = true;
+          saveDegradedFlag(true);
           emitDegradedGpsState('alarm', 'Anchor watch is using backup radio GPS '
             + '(updates every 30s, ~11m accuracy) - turn on the boat GPS');
         }
@@ -596,6 +625,7 @@ module.exports = (app) => {
       ...(settings.dms || {}),
     };
     restartPlugin = () => restart(settings);
+    gnssDegradedAlarmRaised = loadDegradedFlag();
     telemetry = new Telemetry({ windSource: (settings.telemetry || {}).windSource });
     nodeDb = new NodeDb(join(app.getDataDirPath(), 'node-db.json'), (s) => app.debug(s));
 
