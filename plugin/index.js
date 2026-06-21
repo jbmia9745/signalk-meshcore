@@ -565,6 +565,10 @@ module.exports = (app) => {
     device = makeDevice(connection, meshcore.Constants, queue, (s) => app.debug(s), {
       dmRetries: (settings.communications || {}).dm_retries,
       retryGapSeconds: (settings.communications || {}).dm_retry_gap_seconds,
+      resetPathOnFailure: (settings.communications || {}).reset_path_on_failure,
+      resendAfterPathReset: (settings.communications || {}).resend_after_path_reset,
+      resetRecoveryGapSeconds: (settings.communications || {}).reset_recovery_gap_seconds,
+      resetPathCooldownMinutes: (settings.communications || {}).reset_path_cooldown_minutes,
     });
 
     await attachInbound(connection, meshcore.Constants, {
@@ -954,6 +958,28 @@ module.exports = (app) => {
               type: 'integer',
               title: 'Seconds between retries (spacing rides out RF fade windows)',
               default: 5,
+            },
+            reset_path_on_failure: {
+              type: 'boolean',
+              title: 'After a DM exhausts retries, reset that contact\'s stored mesh path so the next send relearns a route',
+              default: true,
+            },
+            resend_after_path_reset: {
+              type: 'boolean',
+              title: 'After a successful path reset, send one recovery copy of the failed DM',
+              default: true,
+            },
+            reset_recovery_gap_seconds: {
+              type: 'integer',
+              title: 'Seconds to wait after a path reset before the recovery resend',
+              default: 3,
+              minimum: 0,
+            },
+            reset_path_cooldown_minutes: {
+              type: 'integer',
+              title: 'Minimum minutes between path resets for the same contact (0 = no cooldown)',
+              default: 10,
+              minimum: 0,
             },
           },
         },
