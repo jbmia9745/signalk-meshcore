@@ -18,6 +18,61 @@ const ONLINE_THRESHOLD_SECS = 60 * 60 * 2;
 // 'disconnected' event) and force a reconnect
 const STALL_THRESHOLD = 5;
 
+// Extra temperature sensors (fridge, cabin, per-battery) are path-driven so
+// Ruuvi/Venus instance numbers stay configurable. Module-level + pure so the
+// subscription list is unit-testable without a live connection.
+const DEFAULT_BATTERY_TEMPS = [
+  { path: 'environment.venus.20.temperature', label: 'Victron' },
+  { path: 'environment.venus.26.temperature', label: 'Batt 1' },
+  { path: 'environment.venus.27.temperature', label: 'Batt 2' },
+  { path: 'environment.venus.28.temperature', label: 'Batt 3' },
+  { path: 'environment.venus.29.temperature', label: 'Batt 4' },
+];
+
+function sensorConfig(settings) {
+  const s = (settings && settings.sensors) || {};
+  return {
+    fridgeTempPath: s.fridge_temp_path || 'environment.inside.refrigerator.temperature',
+    cabinTempPath: s.cabin_temp_path || 'environment.venus.25.temperature',
+    batteryTemps: Array.isArray(s.battery_temps) && s.battery_temps.length
+      ? s.battery_temps
+      : DEFAULT_BATTERY_TEMPS,
+  };
+}
+
+function sensorTempPaths(settings) {
+  const c = sensorConfig(settings);
+  return [c.fridgeTempPath, c.cabinTempPath, ...c.batteryTemps.map((b) => b.path)];
+}
+
+// The full Signal K subscription list. Pure and exported so a test can assert
+// every path is a defined non-empty string — an undefined path here throws on
+// connect and loops the radio (field incident 2026-07-18).
+function buildSubscriptions(settings) {
+  return [
+    { path: 'navigation.position', period: 5000 },
+    { path: 'notifications.*', policy: 'instant' },
+    { path: 'environment.outside.temperature', period: 1000 },
+    { path: 'environment.outside.relativeHumidity', period: 1000 },
+    { path: 'environment.outside.pressure', period: 1000 },
+    // wind is always computed from apparent wind (see telemetry.js)
+    { path: 'environment.wind.angleApparent', period: 1000 },
+    { path: 'environment.wind.speedApparent', period: 1000 },
+    { path: 'navigation.headingTrue', period: 1000 },
+    { path: 'navigation.headingMagnetic', period: 1000 },
+    { path: 'navigation.magneticVariation', period: 1000 },
+    { path: 'navigation.speedThroughWater', period: 1000 },
+    { path: 'navigation.speedOverGround', period: 1000 },
+    { path: 'electrical.batteries.house.voltage', period: 1000 },
+    { path: 'electrical.batteries.house.current', period: 1000 },
+    { path: 'electrical.batteries.house.capacity.stateOfCharge', period: 1000 },
+    { path: 'navigation.anchor.distanceFromBow', period: 1000 },
+    { path: 'navigation.anchor.position', period: 5000 },
+    { path: 'environment.depth.belowSurface', period: 1000 },
+    ...sensorTempPaths(settings).map((path) => ({ path, period: 5000 })),
+  ];
+}
+
 module.exports = (app) => {
   const plugin = {};
   let connection;
@@ -77,35 +132,6 @@ module.exports = (app) => {
     .catch((e) => {
       app.setPluginError(`Failed to load MeshCore library: ${e.message}`);
     });
-
-  // Extra temperature sensors (fridge, cabin, per-battery) are path-driven
-  // so Ruuvi/Venus instance numbers stay configurable. Defaults match the
-  // live vessel; battery temps default to the Victron sensor + four Ruuvi
-  // cells. All read the `sensors` settings group.
-  const DEFAULT_BATTERY_TEMPS = [
-    { path: 'environment.venus.20.temperature', label: 'Victron' },
-    { path: 'environment.venus.26.temperature', label: 'Batt 1' },
-    { path: 'environment.venus.27.temperature', label: 'Batt 2' },
-    { path: 'environment.venus.28.temperature', label: 'Batt 3' },
-    { path: 'environment.venus.29.temperature', label: 'Batt 4' },
-  ];
-
-  function sensorConfig(settings) {
-    const s = settings.sensors || {};
-    return {
-      fridgeTempPath: s.fridge_temp_path || 'environment.inside.refrigerator.temperature',
-      cabinTempPath: s.cabin_temp_path || 'environment.venus.25.temperature',
-      batteryTemps: Array.isArray(s.battery_temps) && s.battery_temps.length
-        ? s.battery_temps
-        : DEFAULT_BATTERY_TEMPS,
-    };
-  }
-
-  // Flat list of every extra sensor temperature path, for the subscription.
-  function sensorTempPaths(settings) {
-    const c = sensorConfig(settings);
-    return [c.fridgeTempPath, c.cabinTempPath, ...c.batteryTemps.map((b) => b.path)];
-  }
 
   // Synthetic MMSI for chartplotter display (populate_vessels): 98-prefix
   // means "craft associated with a parent ship"; 7 digits derived stably
@@ -300,31 +326,10 @@ module.exports = (app) => {
   }
 
   function subscribeSignalK(settings) {
-    const windPaths = telemetry.wind;
     app.subscriptionmanager.subscribe(
       {
         context: 'vessels.self',
-        subscribe: [
-          { path: 'navigation.position', period: 5000 },
-          { path: 'notifications.*', policy: 'instant' },
-          { path: 'environment.outside.temperature', period: 1000 },
-          { path: 'environment.outside.relativeHumidity', period: 1000 },
-          { path: 'environment.outside.pressure', period: 1000 },
-          { path: windPaths.directionPath, period: 1000 },
-          { path: windPaths.speedPath, period: 1000 },
-          { path: 'navigation.headingTrue', period: 1000 },
-          { path: 'navigation.headingMagnetic', period: 1000 },
-          { path: 'navigation.magneticVariation', period: 1000 },
-          { path: 'navigation.speedThroughWater', period: 1000 },
-          { path: 'navigation.speedOverGround', period: 1000 },
-          { path: 'electrical.batteries.house.voltage', period: 1000 },
-          { path: 'electrical.batteries.house.current', period: 1000 },
-          { path: 'electrical.batteries.house.capacity.stateOfCharge', period: 1000 },
-          { path: 'navigation.anchor.distanceFromBow', period: 1000 },
-          { path: 'navigation.anchor.position', period: 5000 },
-          { path: 'environment.depth.belowSurface', period: 1000 },
-          ...sensorTempPaths(settings).map((path) => ({ path, period: 5000 })),
-        ],
+        subscribe: buildSubscriptions(settings),
       },
       unsubscribes,
       (subscriptionError) => {
@@ -1123,3 +1128,8 @@ module.exports = (app) => {
 
   return plugin;
 };
+
+// Exported for tests: validate the subscription path list without a live
+// connection or subscription manager.
+module.exports.buildSubscriptions = buildSubscriptions;
+module.exports.sensorTempPaths = sensorTempPaths;
