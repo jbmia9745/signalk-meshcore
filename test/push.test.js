@@ -48,6 +48,28 @@ test('push sends a line per tick; wind window survives the send', async (t) => {
   assert.strictEqual(device.sent.length, 2);
 });
 
+test('afterBuild fires each tick with the telemetry (for no-heading warning)', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const telemetry = new Telemetry();
+  telemetry.update('environment.outside.temperature', 304.67); // ensures a line
+  const device = mockDevice();
+  const seen = [];
+
+  const stop = startTelemetryPush({
+    device,
+    telemetry,
+    channelIdx: 1,
+    intervalMs: 1000,
+    afterBuild: (t2) => seen.push(t2),
+  });
+
+  t.mock.timers.tick(1000);
+  await new Promise((resolve) => { setImmediate(resolve); });
+  assert.strictEqual(seen.length, 1, 'afterBuild called once per tick');
+  assert.strictEqual(seen[0], telemetry, 'receives the telemetry instance');
+  stop();
+});
+
 test('failed send keeps wind history and logs', async (t) => {
   t.mock.timers.enable({ apis: ['setInterval'] });
   const telemetry = new Telemetry();

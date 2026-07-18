@@ -139,3 +139,134 @@ test('null-island positions are rejected', () => {
   t.update('navigation.position', { latitude: -1e-7, longitude: -1e-7 });
   assert.deepStrictEqual(t.position, { latitude: 25.724, longitude: -80.158 });
 });
+
+// --- computed true wind ---
+const { trueWind } = Telemetry;
+
+test('trueWind vector math matches hand-calculated cases', () => {
+  const near = (a, b) => Math.abs(a - b) < 0.01;
+  // head-on apparent, aws 10, boat 4 -> true 6 dead ahead
+  let r = trueWind(0, 10, 4);
+  assert.ok(near(r.speed, 6) && near(r.angle, 0));
+  // beam apparent (90deg), aws 10, boat 4 -> 10.77 @ 111.8deg
+  r = trueWind(Math.PI / 2, 10, 4);
+  assert.ok(near(r.speed, 10.77) && near(r.angle, (111.8 / 180) * Math.PI));
+  // boat stationary -> true == apparent
+  r = trueWind(0.5, 7, 0);
+  assert.ok(near(r.speed, 7) && near(r.angle, 0.5));
+  // missing input -> null
+  assert.strictEqual(trueWind(0.5, 7, undefined), null);
+});
+
+test('computed mode: under way, vector-subtracts boat motion for true wind', () => {
+  const now = Date.now();
+  const t = new Telemetry({ windSource: 'computed' });
+  t.update('environment.wind.angleApparent', 0.5236); // 30 deg stbd
+  t.update('navigation.speedThroughWater', 4); // ~7.8 kn, under way
+  t.update('navigation.headingTrue', Math.PI / 2); // due E
+  for (let i = 0; i < 5; i += 1) {
+    t.update('environment.wind.speedApparent', 8, now - (5 - i) * 1000);
+  }
+  const w = t.segments().wind;
+  // renders a true compass point + speed, not a bow-relative angle
+  assert.match(w, /^(N|NE|E|SE|S|SW|W|NW) \d/);
+  // true wind here is stronger than apparent forward component but the exact
+  // magnitude differs from apparent 8 m/s (15.6k) — confirm it changed
+  assert.doesNotMatch(w, /15\.6k/);
+});
+
+test('computed mode: at rest (<1 kn), apparent IS true — rendered as true', () => {
+  const now = Date.now();
+  const t = new Telemetry({ windSource: 'computed' });
+  t.update('environment.wind.angleApparent', 0.5236);
+  t.update('navigation.speedThroughWater', 0.2); // <1 kn: at rest
+  t.update('navigation.headingTrue', Math.PI / 2);
+  for (let i = 0; i < 3; i += 1) {
+    t.update('environment.wind.speedApparent', 8, now - (3 - i) * 1000);
+  }
+  // apparent==true at rest: true compass point, speed == apparent (8 m/s=15.6k)
+  const w = t.segments().wind;
+  assert.match(w, /^(N|NE|E|SE|S|SW|W|NW) 15\.6k/);
+});
+
+test('computed mode: absent boat speed treated as at rest (apparent is true)', () => {
+  const now = Date.now();
+  const t = new Telemetry({ windSource: 'computed' });
+  t.update('environment.wind.angleApparent', 0.5236);
+  t.update('navigation.headingTrue', Math.PI / 2);
+  // no STW/SOG at all
+  for (let i = 0; i < 3; i += 1) {
+    t.update('environment.wind.speedApparent', 8, now - (3 - i) * 1000);
+  }
+  assert.match(t.segments().wind, /^(N|NE|E|SE|S|SW|W|NW) 15\.6k/);
+});
+
+test('computed mode: SOG used when STW absent', () => {
+  const now = Date.now();
+  const t = new Telemetry({ windSource: 'computed' });
+  t.update('environment.wind.angleApparent', 0.5236);
+  t.update('navigation.speedOverGround', 4); // only SOG present, under way
+  t.update('navigation.headingTrue', Math.PI / 2);
+  for (let i = 0; i < 3; i += 1) {
+    t.update('environment.wind.speedApparent', 8, now - (3 - i) * 1000);
+  }
+  const w = t.segments().wind;
+  assert.match(w, /^(N|NE|E|SE|S|SW|W|NW) \d/);
+  assert.doesNotMatch(w, /15\.6k/); // computed, not passthrough
+});
+
+test('computed mode: no heading → wind suppressed and flag set (no erroneous output)', () => {
+  const now = Date.now();
+  const t = new Telemetry({ windSource: 'computed' });
+  t.update('environment.wind.angleApparent', 0.5236);
+  t.update('navigation.speedThroughWater', 4);
+  // no headingTrue and no headingMagnetic → can't place a true point
+  for (let i = 0; i < 3; i += 1) {
+    t.update('environment.wind.speedApparent', 8, now - (3 - i) * 1000);
+  }
+  const s = t.segments();
+  assert.strictEqual(s.wind, undefined, 'no wind segment rendered without heading');
+  assert.strictEqual(t.computedWindNoHeading, true, 'no-heading flag raised');
+});
+
+test('computed mode: no-heading flag clears once heading returns', () => {
+  const now = Date.now();
+  const t = new Telemetry({ windSource: 'computed' });
+  t.update('environment.wind.angleApparent', 0.5236);
+  t.update('navigation.speedThroughWater', 0.2);
+  for (let i = 0; i < 3; i += 1) {
+    t.update('environment.wind.speedApparent', 8, now - (3 - i) * 1000);
+  }
+  t.segments();
+  assert.strictEqual(t.computedWindNoHeading, true);
+  t.update('navigation.headingMagnetic', Math.PI / 2);
+  t.segments();
+  assert.strictEqual(t.computedWindNoHeading, false, 'flag clears when heading present');
+});
+
+test('computed mode: magnetic heading + variation fallback yields true point', () => {
+  const now = Date.now();
+  const t = new Telemetry({ windSource: 'computed', variationDegrees: -7 });
+  t.update('environment.wind.angleApparent', 0.5236);
+  t.update('navigation.speedThroughWater', 0.2); // at rest, simple case
+  t.update('navigation.headingMagnetic', Math.PI / 2); // 90 mag, no bus variation
+  for (let i = 0; i < 3; i += 1) {
+    t.update('environment.wind.speedApparent', 8, now - (3 - i) * 1000);
+  }
+  // magnetic heading + fallback variation → a valid true compass point
+  assert.match(t.segments().wind, /^(N|NE|E|SE|S|SW|W|NW) 15\.6k/);
+});
+
+test('computed mode: bus magneticVariation wins over the fallback', () => {
+  const now = Date.now();
+  const t = new Telemetry({ windSource: 'computed', variationDegrees: -7 });
+  t.update('environment.wind.angleApparent', 0);
+  t.update('navigation.speedThroughWater', 0.2);
+  t.update('navigation.headingMagnetic', 0); // pointing 0 mag
+  t.update('navigation.magneticVariation', Math.PI / 2); // bus says +90 → true 90 = E
+  for (let i = 0; i < 3; i += 1) {
+    t.update('environment.wind.speedApparent', 8, now - (3 - i) * 1000);
+  }
+  // heading true = 0 + 90 = E, wind dead ahead → E
+  assert.match(t.segments().wind, /^E /);
+});

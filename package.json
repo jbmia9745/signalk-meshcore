@@ -1,7 +1,12 @@
 {
   "name": "signalk-meshcore",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "Signal K plugin for interfacing with the MeshCore LoRa mesh network",
+  "files": [
+    "plugin/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "lint": "eslint .",
     "test": "node --test"

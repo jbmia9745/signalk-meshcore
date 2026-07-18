@@ -78,6 +78,35 @@ module.exports = (app) => {
       app.setPluginError(`Failed to load MeshCore library: ${e.message}`);
     });
 
+  // Extra temperature sensors (fridge, cabin, per-battery) are path-driven
+  // so Ruuvi/Venus instance numbers stay configurable. Defaults match the
+  // live vessel; battery temps default to the Victron sensor + four Ruuvi
+  // cells. All read the `sensors` settings group.
+  const DEFAULT_BATTERY_TEMPS = [
+    { path: 'environment.venus.20.temperature', label: 'Victron' },
+    { path: 'environment.venus.26.temperature', label: 'Batt 1' },
+    { path: 'environment.venus.27.temperature', label: 'Batt 2' },
+    { path: 'environment.venus.28.temperature', label: 'Batt 3' },
+    { path: 'environment.venus.29.temperature', label: 'Batt 4' },
+  ];
+
+  function sensorConfig(settings) {
+    const s = settings.sensors || {};
+    return {
+      fridgeTempPath: s.fridge_temp_path || 'environment.inside.refrigerator.temperature',
+      cabinTempPath: s.cabin_temp_path || 'environment.venus.25.temperature',
+      batteryTemps: Array.isArray(s.battery_temps) && s.battery_temps.length
+        ? s.battery_temps
+        : DEFAULT_BATTERY_TEMPS,
+    };
+  }
+
+  // Flat list of every extra sensor temperature path, for the subscription.
+  function sensorTempPaths(settings) {
+    const c = sensorConfig(settings);
+    return [c.fridgeTempPath, c.cabinTempPath, ...c.batteryTemps.map((b) => b.path)];
+  }
+
   // Synthetic MMSI for chartplotter display (populate_vessels): 98-prefix
   // means "craft associated with a parent ship"; 7 digits derived stably
   // from the node public key. Ported from upstream's nodeNum scheme.
@@ -238,6 +267,25 @@ module.exports = (app) => {
     });
   }
 
+  // Computed-wind "no heading" warning. State-based (raise once, clear once)
+  // so a persistently-headingless boat doesn't storm the notification tree.
+  // Warn severity (visual only) — degraded wind data, not a vessel hazard.
+  const NO_HEADING_PATH = 'notifications.environment.wind.noHeading';
+  let noHeadingWarned = false;
+  function updateNoHeadingWarning(t) {
+    const missing = !!(t && t.computedWindNoHeading);
+    if (missing === noHeadingWarned) {
+      return; // no state change
+    }
+    noHeadingWarned = missing;
+    const value = missing
+      ? { state: 'warn', method: ['visual'], message: 'Computed wind: no heading source — wind reading unavailable' }
+      : null;
+    app.handleMessage(plugin.id, {
+      updates: [{ values: [{ path: NO_HEADING_PATH, value }] }],
+    });
+  }
+
   function setAnchorWatch(active) {
     if (anchorWatchActive === active) {
       return;
@@ -267,12 +315,15 @@ module.exports = (app) => {
           { path: 'navigation.headingTrue', period: 1000 },
           { path: 'navigation.headingMagnetic', period: 1000 },
           { path: 'navigation.magneticVariation', period: 1000 },
+          { path: 'navigation.speedThroughWater', period: 1000 },
+          { path: 'navigation.speedOverGround', period: 1000 },
           { path: 'electrical.batteries.house.voltage', period: 1000 },
           { path: 'electrical.batteries.house.current', period: 1000 },
           { path: 'electrical.batteries.house.capacity.stateOfCharge', period: 1000 },
           { path: 'navigation.anchor.distanceFromBow', period: 1000 },
           { path: 'navigation.anchor.position', period: 5000 },
           { path: 'environment.depth.belowSurface', period: 1000 },
+          ...sensorTempPaths(settings).map((path) => ({ path, period: 5000 })),
         ],
       },
       unsubscribes,
@@ -621,6 +672,7 @@ module.exports = (app) => {
             ? (settings.telemetry.vesselName || app.getSelfPath('name'))
             : undefined,
           log: (s) => app.debug(s),
+          afterBuild: updateNoHeadingWarning,
         });
       }
     }
@@ -697,7 +749,11 @@ module.exports = (app) => {
           );
         });
     }
-    telemetry = new Telemetry({ windSource: (settings.telemetry || {}).windSource });
+    telemetry = new Telemetry({
+      windSource: (settings.telemetry || {}).windSource,
+      variationDegrees: (settings.telemetry || {}).magnetic_variation_degrees,
+      ...sensorConfig(settings),
+    });
     nodeDb = new NodeDb(join(app.getDataDirPath(), 'node-db.json'), (s) => app.debug(s));
 
     nodeDb.load()
@@ -1013,12 +1069,46 @@ module.exports = (app) => {
             },
             windSource: {
               type: 'string',
-              title: 'Wind data source (labels follow: true=Wd/Ws, apparent=Wa/Wsa)',
+              title: 'Wind data source',
               default: 'true',
               oneOf: [
-                { const: 'true', title: 'True wind (environment.wind.directionTrue / speedOverGround)' },
-                { const: 'apparent', title: 'Apparent wind (environment.wind.angleApparent / speedApparent)' },
+                { const: 'true', title: 'True wind — read directionTrue / speedOverGround as-is (use only if the bus supplies genuine true wind)' },
+                { const: 'apparent', title: 'Apparent wind — bow-relative angle from angleApparent / speedApparent' },
+                { const: 'computed', title: 'Computed true wind — derive from apparent + boat speed & heading; falls back to apparent when motion data is missing' },
               ],
+            },
+            magnetic_variation_degrees: {
+              type: 'number',
+              title: 'Fallback magnetic variation in degrees (computed wind, used only when the bus does not supply magneticVariation — e.g. GPS off). East +, West -. Default -7 (Miami).',
+              default: -7,
+            },
+          },
+        },
+        sensors: {
+          type: 'object',
+          title: 'Extra temperature sensors (fridge, cabin, battery)',
+          properties: {
+            fridge_temp_path: {
+              type: 'string',
+              title: 'Fridge temperature Signal K path (fridge/f command)',
+              default: 'environment.inside.refrigerator.temperature',
+            },
+            cabin_temp_path: {
+              type: 'string',
+              title: 'Cabin temperature Signal K path (cabin/c command)',
+              default: 'environment.venus.25.temperature',
+            },
+            battery_temps: {
+              type: 'array',
+              title: 'Battery temperature sensors, appended to the batt/b report',
+              items: {
+                type: 'object',
+                required: ['path'],
+                properties: {
+                  path: { type: 'string', title: 'Signal K path (e.g. environment.venus.20.temperature)' },
+                  label: { type: 'string', title: 'Label (e.g. Victron, Batt 1)' },
+                },
+              },
             },
           },
         },

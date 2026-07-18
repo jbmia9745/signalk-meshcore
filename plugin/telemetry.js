@@ -7,6 +7,9 @@ const units = require('./units');
 // 10-minute wind, not an hour-long smear.
 const WIND_WINDOW_MS = 10 * 60000;
 const GUST_SAMPLES = 3;
+// Below this boat speed the vessel is "at rest" and apparent wind IS true
+// wind (anchor/mooring/marina; a boat still swings, so use a threshold not 0).
+const AT_REST_MS = 0.514; // 1 knot
 
 function mean(arr) {
   return arr.reduce((a, b) => a + b, 0) / arr.length;
@@ -24,6 +27,30 @@ function maxGust(values) {
     }
   }
   return best;
+}
+
+// True wind from apparent wind + boat motion (vector subtraction of the
+// boat's velocity from the apparent wind vector). Returns { speed, angle }
+// where speed is m/s and angle is the true wind angle relative to the bow
+// (rad, signed like the apparent angle), or null when inputs are missing.
+//
+// awa: apparent wind angle rel. bow (rad, +stbd), aws: apparent speed (m/s),
+// bs: boat speed (m/s). "true" here is relative to whatever bs represents —
+// speed through water (wind over water) or SOG (wind over ground); the
+// caller picks the boat-speed source. At bs=0, true == apparent.
+function trueWind(awa, aws, bs) {
+  if (!Number.isFinite(awa) || !Number.isFinite(aws) || !Number.isFinite(bs)) {
+    return null;
+  }
+  if (bs === 0) {
+    return { speed: aws, angle: awa };
+  }
+  // components: x along the bow-stern axis, y athwartships
+  const x = aws * Math.cos(awa) - bs;
+  const y = aws * Math.sin(awa);
+  const speed = Math.sqrt(x * x + y * y);
+  const angle = Math.atan2(y, x);
+  return { speed, angle };
 }
 
 // Which Signal K paths feed the wind segment. True wind renders as a
@@ -51,7 +78,32 @@ class Telemetry {
     this.data = {};
     this.position = null;
     this.positionAt = null; // ms timestamp of the last accepted position
-    this.wind = WIND_SOURCES[options.windSource] || WIND_SOURCES.true;
+    // windSource: 'true' | 'apparent' | 'computed'. 'computed' derives true
+    // wind from apparent wind + boat motion: under way it uses the live boat
+    // speed/heading; at rest (<1 kn) apparent IS true, so it reports apparent
+    // labeled as true. Reads the apparent paths for its raw feed.
+    this.windMode = options.windSource || 'true';
+    this.wind = this.windMode === 'computed'
+      ? WIND_SOURCES.apparent
+      : (WIND_SOURCES[options.windSource] || WIND_SOURCES.true);
+    // Fallback magnetic variation (radians) used to convert magnetic heading
+    // to true when the bus does not supply navigation.magneticVariation
+    // (e.g. GPS off, so no WMM broadcast). Bus value wins when present.
+    // Config is in degrees; default -7 (Miami). East +, West -.
+    this.variationFallback = ((options.variationDegrees !== undefined
+      ? options.variationDegrees : -7) * Math.PI) / 180;
+    // Extra temperature sensors (fridge, cabin, per-battery), path-driven
+    // so instance numbers (e.g. environment.venus.25) stay configurable —
+    // Ruuvi/Venus instances can renumber. Each battery temp is {path,label}.
+    this.fridgeTempPath = options.fridgeTempPath || 'environment.inside.refrigerator.temperature';
+    this.cabinTempPath = options.cabinTempPath || 'environment.venus.25.temperature';
+    this.batteryTemps = options.batteryTemps || [];
+  }
+
+  // °F for a configured temperature path, or null when absent/non-finite.
+  tempF(path) {
+    const v = this.data[path];
+    return Number.isFinite(v) ? units.kToF(v) : null;
   }
 
   update(path, value, at) {
@@ -103,9 +155,77 @@ class Telemetry {
       return d['navigation.headingTrue'];
     }
     if (Number.isFinite(d['navigation.headingMagnetic'])) {
-      return d['navigation.headingMagnetic'] + (d['navigation.magneticVariation'] || 0);
+      // bus variation wins when present; else the configured fallback
+      const variation = Number.isFinite(d['navigation.magneticVariation'])
+        ? d['navigation.magneticVariation']
+        : this.variationFallback;
+      return d['navigation.headingMagnetic'] + variation;
     }
     return undefined;
+  }
+
+  // Boat speed (m/s): speed through water preferred (wind over water), speed
+  // over ground as fallback. Returns a number (may be 0) or null if neither
+  // instrument reports.
+  boatSpeed() {
+    const d = this.data;
+    if (Number.isFinite(d['navigation.speedThroughWater'])) {
+      return d['navigation.speedThroughWater'];
+    }
+    if (Number.isFinite(d['navigation.speedOverGround'])) {
+      return d['navigation.speedOverGround'];
+    }
+    return null;
+  }
+
+  // Computed-mode true wind → { dir, speed } render strings, or null to let
+  // the caller render apparent. Rules:
+  //   - boat speed < 1 kn OR absent → apparent IS true; report apparent
+  //     magnitude/direction labeled true (a true compass point via heading).
+  //   - boat speed ≥ 1 kn → vector-subtract boat motion for genuine true wind.
+  //   - no usable heading either way → null (caller shows apparent bow angle;
+  //     a true compass point can't be placed without heading).
+  // Speed is WMO-smoothed. v1 approximation: at ≥1 kn, true speed is recomputed
+  // from buffered apparent samples against the render-time boat speed, not the
+  // boat speed at each historical sample (documented limit).
+  computeTrueWind() {
+    // Reset the no-heading flag each attempt; set only on the heading-missing
+    // path below so the plugin can raise/clear a "no heading" warning.
+    this.computedWindNoHeading = false;
+    const d = this.data;
+    const awa = d[this.wind.directionPath]; // apparent wind angle
+    if (!Number.isFinite(awa)) {
+      return null;
+    }
+    this.pruneWind();
+    const ws = d[this.wind.speedPath];
+    if (!Array.isArray(ws) || !ws.length) {
+      return null;
+    }
+    const heading = this.trueHeading();
+    if (!Number.isFinite(heading)) {
+      // No heading source at all: a computed true point would be erroneous.
+      // Flag it so the plugin warns; return null (no wind segment rendered).
+      this.computedWindNoHeading = true;
+      return null;
+    }
+    const bs = this.boatSpeed();
+    // At rest (or no speed instrument): apparent IS true. bs=0 makes trueWind
+    // a pass-through, so use 0 for both direction and speed smoothing.
+    const effectiveBs = (bs === null || bs < AT_REST_MS) ? 0 : bs;
+    const twNow = trueWind(awa, ws[ws.length - 1].v, effectiveBs);
+    const dir = units.radToPoint(heading + twNow.angle);
+    const trueSpeeds = ws
+      .map((s) => trueWind(awa, s.v, effectiveBs))
+      .filter(Boolean)
+      .map((r) => r.speed);
+    const sustained = units.msToKn(mean(trueSpeeds));
+    const gust = units.msToKn(maxGust(trueSpeeds));
+    let speed = `${sustained.toFixed(1)}k`;
+    if (gust >= sustained + 2) {
+      speed += ` gusts ${Math.round(gust)}k`;
+    }
+    return { dir, speed };
   }
 
   // Human-readable segments, e.g.
@@ -125,20 +245,36 @@ class Telemetry {
     if (Number.isFinite(d['environment.outside.pressure'])) {
       out.pressure = `${Math.round(units.paToMb(d['environment.outside.pressure']))}mb`;
     }
-    const dir = Number.isFinite(d[this.wind.directionPath])
-      ? this.wind.formatDirection(d[this.wind.directionPath], this.trueHeading())
-      : null;
+    // In 'computed' mode derive true wind from apparent + boat motion.
+    // computeTrueWind returns the rendering pieces, or null. A null WITH the
+    // no-heading flag set means we deliberately render no wind (a computed
+    // point would be erroneous without heading); the plugin warns separately.
+    // A null for any other reason (no apparent data) simply yields no wind.
+    const tw = this.windMode === 'computed' ? this.computeTrueWind() : null;
+    const suppressWind = this.windMode === 'computed' && this.computedWindNoHeading;
+    let dir = null;
+    if (tw) {
+      dir = tw.dir;
+    } else if (!suppressWind && Number.isFinite(d[this.wind.directionPath])) {
+      dir = this.wind.formatDirection(d[this.wind.directionPath], this.trueHeading());
+    }
     this.pruneWind();
-    const ws = d[this.wind.speedPath];
     let speed = null;
-    if (Array.isArray(ws) && ws.length) {
-      const values = ws.map((s) => s.v);
-      const sustained = units.msToKn(mean(values));
-      const gust = units.msToKn(maxGust(values));
-      speed = `${sustained.toFixed(1)}k`;
-      // show the gust only when it meaningfully exceeds the sustained wind
-      if (gust >= sustained + 2) {
-        speed += ` gusts ${Math.round(gust)}k`;
+    if (suppressWind) {
+      speed = null;
+    } else if (tw) {
+      speed = tw.speed;
+    } else {
+      const ws = d[this.wind.speedPath];
+      if (Array.isArray(ws) && ws.length) {
+        const values = ws.map((s) => s.v);
+        const sustained = units.msToKn(mean(values));
+        const gust = units.msToKn(maxGust(values));
+        speed = `${sustained.toFixed(1)}k`;
+        // show the gust only when it meaningfully exceeds the sustained wind
+        if (gust >= sustained + 2) {
+          speed += ` gusts ${Math.round(gust)}k`;
+        }
       }
     }
     if (dir || speed) {
@@ -162,6 +298,14 @@ class Telemetry {
     if (Number.isFinite(d['electrical.batteries.house.current'])) {
       const amps = d['electrical.batteries.house.current'];
       batt.push(`${amps > 0 ? '+' : ''}${amps.toFixed(1)}A`);
+    }
+    // Battery temperatures (Victron + per-cell Ruuvi), appended compactly:
+    // "Temps 87.5/87.8/87.9/87.3/87.4F". Only cells with live data show.
+    const temps = this.batteryTemps
+      .map((b) => this.tempF(b.path))
+      .filter((f) => f !== null);
+    if (temps.length) {
+      batt.push(`Temps ${temps.map((f) => f.toFixed(1)).join('/')}F`);
     }
     if (batt.length) {
       out.batt = batt.join(' ');
@@ -190,3 +334,4 @@ class Telemetry {
 }
 
 module.exports = Telemetry;
+module.exports.trueWind = trueWind;

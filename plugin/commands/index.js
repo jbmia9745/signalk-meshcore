@@ -1,6 +1,7 @@
 exports.ping = require('./ping');
 exports.switching = require('./switching');
 exports.telemetry = require('./telemetry');
+exports.sensors = require('./sensors');
 
 // Crew membership is keyed on the contact public key (hex string in
 // settings; msg.from is the raw Uint8Array from the contact DB).
@@ -16,8 +17,8 @@ exports.isFromCrew = (msg, settings) => {
 
 exports.help = {
   crewOnly: false,
-  example: 'Help',
-  accept: (msg) => (msg.data.trim().toLowerCase() === 'help'),
+  example: 'Help/H',
+  accept: (msg) => ['help', 'h'].includes(msg.data.trim().toLowerCase()),
   handle: (msg, settings, device) => {
     const commands = Object.keys(exports)
       .filter((cmd) => {

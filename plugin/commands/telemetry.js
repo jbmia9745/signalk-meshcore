@@ -1,12 +1,24 @@
-// Telemetry pull verbs: wx | batt | pos | depth | status
-const VERBS = ['wx', 'batt', 'pos', 'depth', 'status'];
+// Telemetry pull verbs, each with a short alias:
+//   wx/w | batt/b | pos/ps | depth/d | status/s
+const ALIASES = {
+  wx: 'wx',
+  w: 'wx',
+  batt: 'batt',
+  b: 'batt',
+  pos: 'pos',
+  ps: 'pos',
+  depth: 'depth',
+  d: 'depth',
+  status: 'status',
+  s: 'status',
+};
 
 module.exports = {
   crewOnly: false,
-  example: 'WX | Batt | Pos | Depth | Status',
-  accept: (msg) => VERBS.includes(msg.data.trim().toLowerCase()),
+  example: 'WX/W | Batt/B | Pos/Ps | Depth/D | Status/S',
+  accept: (msg) => Object.prototype.hasOwnProperty.call(ALIASES, msg.data.trim().toLowerCase()),
   handle: (msg, settings, device, app, telemetry) => {
-    const verb = msg.data.trim().toLowerCase();
+    const verb = ALIASES[msg.data.trim().toLowerCase()];
     const s = telemetry.segments();
     const join = (keys) => telemetry.constructor.joinSegments(s, keys);
     let reply;
