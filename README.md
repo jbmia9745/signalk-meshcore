@@ -46,7 +46,7 @@ Pipe-delimited, self-describing units, max 133 chars (the multi-hop-safe MeshCor
 | temperature | `87.4F` | outside |
 | humidity | `65%RH` | outside |
 | pressure | `1019mb` | barometric |
-| wind | `42S(E) 7.5k gusts 11k` | see below |
+| wind | `E 7.5k gusts 11k` | true wind as a compass point; see below |
 | depth + anchor | `Depth 12.6FT Dist 98FT` | depth below surface; `Dist` = horizontal distance from bow to the anchor drop position (from signalk-anchoralarm-plugin), shown only when anchored |
 | house bank | `SOC 97% 13.3V +6.2A` | current signed: + charging, − discharging |
 
@@ -62,11 +62,34 @@ Fields with no data are omitted.
 
 ### Wind: how to read it, and the measurement window
 
-`42S(E) 7.5k gusts 11k` reads: apparent wind 42° off the bow on the **s**tarboard side, blowing from the **E**ast (8-point compass), 7.5 knots, gusting 11.
+`E 7.5k gusts 11k` reads: true wind from the **E**ast (8-point compass), 7.5 knots, gusting 11.
 
+**Wind is always reported as true wind — there is no mode to select.** A boat has no true-wind sensor: the masthead reads *apparent* wind, and true wind is derived. The plugin does that derivation for you:
+
+- **Under way (boat speed ≥ 1 kn):** true wind is computed by vector-subtracting the boat's motion from the apparent wind (using speed through water, or SOG if STW is absent, plus heading).
+- **At rest (< 1 kn, or no speed instrument):** apparent wind *is* true wind, so it's reported directly.
+
+- **Direction** is placed on the compass rose using the vessel's heading: `navigation.headingTrue` if present, otherwise `navigation.headingMagnetic` corrected by variation. Variation comes from the bus (`navigation.magneticVariation`, normally broadcast by a GPS with a fix) when available; otherwise a configurable fallback (`magnetic_variation_degrees`, default −7 for Miami) is used. **If no heading source exists at all, wind is omitted** (a compass point would be wrong) and a `warn` notification `notifications.environment.wind.noHeading` is raised until heading returns.
 - **Measurement follows the WMO standard** and is independent of the push interval: **speed** is the mean of 1-second samples over a rolling **10-minute** window; **gusts** is the highest **3-second average** within that window, shown only when it exceeds the sustained speed by ≥ 2 kn (a single 1-second spike doesn't qualify). Pushes and pull verbs both read the same rolling window, so an hourly push still reports 10-minute wind, not an hour-long smear.
-- The **compass point in parentheses** places the bow-relative apparent angle on the compass rose using the vessel's heading (`headingTrue`, or `headingMagnetic` + variation). At rest (mooring/anchor, no boat speed) apparent wind equals true wind, so the point is exact; under way it is an estimate. Without a heading source the segment degrades to `42S 7.5k`.
-- `windSource` is configurable: `apparent` (above) or `true`, which renders compass-point-first: `E 7.5k gusts 11k`. Pick whichever your boat's paths genuinely carry — on many setups `directionTrue` is mislabeled apparent data; check before trusting it.
+
+## Crew commands (DMs)
+
+Crew nodes send these as direct messages to the boat radio. Each verb has a long and short form (both work, case-insensitive). Replies are held briefly for quiet air (`reply_delay_seconds`) and retried if unconfirmed (`dm_retries`).
+
+| Command | Short | Reply | Notes |
+|---|---|---|---|
+| `status` | `s` | full telemetry line | temp, humidity, pressure, wind, depth, house bank + battery temps |
+| `wx` | `w` | `T \| H \| P \| wind` | weather subset |
+| `batt` | `b` | `SOC.. V.. A.. Temps ../../..F` | house bank electrical + all battery temperatures appended |
+| `pos` | `ps` | `lat,lon` | boat position (needs a real GNSS source) |
+| `depth` | `d` | `Depth ..FT` | plus anchor `Dist` when anchored |
+| `fridge` | `f` | `Fridge ..F` | refrigerator temperature (Ruuvi/configured) |
+| `cabin` | `c` | `Cabin ..F` | cabin ambient temperature (Ruuvi/configured) |
+| `ping` | `p` | `Pong` | link check |
+| `help` | `h` | list of commands | |
+| `<switch> on/off` | — | `OK, <switch> is on` | digital switching, if configured |
+
+Extra temperature sensors (fridge, cabin, per-battery) are configured under the **Sensors** settings group by Signal K path, so Venus/Ruuvi instance numbers can be remapped without a code change. Defaults match the reference vessel.
 
 ## Venus OS / Cerbo GX install notes
 
@@ -116,24 +139,50 @@ The radio-GNSS fallback exists for telemetry continuity, not drag detection: its
 
 ## Plugin settings layout
 
-Settings are grouped into: **Telemetry** (vessel position out, radio-GNSS fallback, crew display in Signal K, crew position polls, digital switching), **Alerts** (forwarding, alert channel, storm cooldown), **Direct messages** (reply quiescence hold, retries, retry gap), and **Channel messages** (the telemetry push line: channel, interval, vessel name, wind source). Configs saved under the old single "Communications" section are still honored.
+Settings are grouped into: **Telemetry** (vessel position out, radio-GNSS fallback, crew display in Signal K, crew position polls, digital switching), **Alerts** (forwarding, alert channel, storm cooldown), **Direct messages** (reply quiescence hold, retries, retry gap, path-reset-on-failure), **Channel messages** (the telemetry push line: channel, interval, vessel name, and `magnetic_variation_degrees` fallback for computed wind), and **Sensors** (fridge / cabin / battery temperature Signal K paths for the extra temperature commands). Configs saved under the old single "Communications" section are still honored.
 
 ## Known issues / not yet implemented
 
-- **Restart connect-churn**: each plugin/server restart can produce one or two quick disconnect/reconnect cycles (~35 s apart) before the session settles. Self-healing, under investigation (suspected ESP32 auto-reset on serial port close).
+- **Rapid repeated restarts can wedge the radio's USB.** Cycling the plugin many times in quick succession (`svc -t` in a burst) can leave the Cerbo's USB CDC in a state where the port opens then immediately closes, looping. Recovery: a full Cerbo power cycle, or physically replugging the radio's USB. Avoid burst restarts — restart once and let it settle.
 - **Digital switching** ships disabled with an empty switch map — mapping friendly names to your real switch-bank paths (and verifying the bank accepts PUTs) is a per-boat commissioning step.
 - **In-plugin channel management** (create/rename channels from settings) is planned; today the channel must exist on the radio with the configured name.
 
-## On-boat validation checklist (pre-release)
+## On-boat validation
 
-- [ ] Venus OS Large: bundled Node version vs `engines` (>=22); `cdc_acm` driver presents the radio as `/dev/ttyACM*`; `serialport` prebuilds load on ARM (TCP fallback otherwise)
-- [ ] path-mapper aliases present for all telemetry paths; values sane vs instruments
-- [ ] genuine GNSS fix on the bus before enabling `send_position` / `pos`
-- [ ] wind source setting matches what the boat's paths actually carry (true vs apparent)
-- [ ] switch name→path mapping against the real N2K switch bank
-- [ ] push interval vs regional duty-cycle norms
-- [ ] telemetry channel + secret distributed to crew phones
-- [ ] multi-day soak
+### Confirmed at the dock (v0.3.2)
+
+- [x] Plugin connects to the radio and holds a stable session (single connect, no reconnect loop)
+- [x] Crew commands respond end-to-end: `p`/`ping`, `s`/`status`, `w`/`wx`, `f`/`fridge`, and short forms
+- [x] Battery temperatures appended to `batt`/`s` (Victron + Ruuvi cells)
+- [x] Fridge / cabin temperature commands return live sensor values
+- [x] Computed wind renders as a true compass point at rest (apparent = true, placed by magnetic heading + variation fallback)
+- [x] Radio-GNSS fallback feeds `navigation.position` when the boat GPS is stale
+
+### Must be tested under way (not verifiable at the dock)
+
+These require the boat actually moving, with instruments live:
+
+- [ ] **Computed true wind under way.** With boat speed ≥ 1 kn, confirm `w`/`s` wind is the *computed* true wind (differs from raw apparent), and sanity-check direction/speed against the chartplotter's own true-wind readout across a few headings and points of sail.
+- [ ] **Boat-speed source present.** Confirm `navigation.speedThroughWater` (or `speedOverGround`) actually publishes a non-zero value under way — the computation depends on it. (At the dock STW read 0 and SOG was absent.)
+- [ ] **Heading + variation under way.** With the boat GPS on and a fix, confirm `navigation.headingTrue` and `navigation.magneticVariation` appear on the bus (GPS broadcasts variation via PGN 127258) and that computed wind uses the bus variation, not the −7° fallback.
+- [ ] **`pos` returns a real fix.** Confirm a genuine GNSS fix on the bus (not null-island, not the radio fallback) before relying on `pos` / `send_position`.
+- [ ] **No-heading warning behaves.** If heading is ever lost under way, confirm wind is omitted and `notifications.environment.wind.noHeading` (warn) raises and self-clears.
+- [ ] **Depth / anchor** values sane against the instruments while moving and at anchor.
+
+### Our requirements to publish (distinct from Signal K's — Signal K itself gates nothing)
+
+Signal K's AppStore has no approval step; `npm publish` with the right keywords is the whole mechanism. These are *our* release bars:
+
+- [ ] All "under way" items above confirmed on the water.
+- [ ] **Digital switching** mapped and verified against the real N2K switch bank (PUTs accepted), OR shipped explicitly disabled and documented as a commissioning step. *(No writable switches on the reference boat — deferred as a future enhancement.)*
+- [ ] **Multi-day soak** on the boat: stable connection, no wedge, telemetry pushes and crew commands working across power cycles and day/night mesh conditions.
+- [ ] **Repeater / marginal-path behavior** exercised: with a healthy rig repeater, confirm directed-DM delivery and that `reset_path_on_failure` heals a stale path (the reset-path feature has not yet fired in the field).
+- [ ] **Venus environment**: bundled Node vs `engines`, `cdc_acm` presents `/dev/ttyACM*`, `serialport` ARM prebuilds load (TCP fallback otherwise).
+- [ ] **Path-mapper aliases** present for all telemetry paths; values sane vs instruments.
+- [ ] **Push interval** vs regional duty-cycle norms.
+- [ ] **Telemetry channel + secret** distributed to crew phones.
+- [ ] **Courtesy issue** raised with upstream `meri-imperiumi` (signalk-meshtastic author) before publishing the fork.
+- [ ] `npm publish` (name is free; keywords already set).
 
 ## License
 
