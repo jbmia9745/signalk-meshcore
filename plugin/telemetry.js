@@ -53,39 +53,18 @@ function trueWind(awa, aws, bs) {
   return { speed, angle };
 }
 
-// Which Signal K paths feed the wind segment. True wind renders as a
-// compass point ("E 8.2K"); apparent is a bow-relative angle ("27S"),
-// plus a heading-derived compass point in parens ("27S(E)") when the
-// vessel heading is known — exact at rest, an estimate under way.
-const WIND_SOURCES = {
-  true: {
-    directionPath: 'environment.wind.directionTrue',
-    speedPath: 'environment.wind.speedOverGround',
-    formatDirection: (rad) => units.radToPoint(rad),
-  },
-  apparent: {
-    directionPath: 'environment.wind.angleApparent',
-    speedPath: 'environment.wind.speedApparent',
-    formatDirection: (rad, heading) => {
-      const bow = units.radToBowAngle(rad);
-      return Number.isFinite(heading) ? `${bow}(${units.radToPoint(heading + rad)})` : bow;
-    },
-  },
-};
+// The wind segment always reports TRUE wind. There's no true-wind sensor on
+// a boat: the masthead reads apparent, so true wind is derived from apparent
+// wind + boat motion. Under way (>=1 kn) that's a vector computation; at rest
+// (<1 kn) apparent IS true. These are the apparent-wind input paths.
+const WIND_ANGLE_PATH = 'environment.wind.angleApparent';
+const WIND_SPEED_PATH = 'environment.wind.speedApparent';
 
 class Telemetry {
   constructor(options = {}) {
     this.data = {};
     this.position = null;
     this.positionAt = null; // ms timestamp of the last accepted position
-    // windSource: 'true' | 'apparent' | 'computed'. 'computed' derives true
-    // wind from apparent wind + boat motion: under way it uses the live boat
-    // speed/heading; at rest (<1 kn) apparent IS true, so it reports apparent
-    // labeled as true. Reads the apparent paths for its raw feed.
-    this.windMode = options.windSource || 'true';
-    this.wind = this.windMode === 'computed'
-      ? WIND_SOURCES.apparent
-      : (WIND_SOURCES[options.windSource] || WIND_SOURCES.true);
     // Fallback magnetic variation (radians) used to convert magnetic heading
     // to true when the bus does not supply navigation.magneticVariation
     // (e.g. GPS off, so no WMM broadcast). Bus value wins when present.
@@ -117,7 +96,7 @@ class Telemetry {
       }
       return;
     }
-    if (path === this.wind.speedPath) {
+    if (path === WIND_SPEED_PATH) {
       this.updateWindSpeed(value, at);
       return;
     }
@@ -128,15 +107,15 @@ class Telemetry {
     if (!Number.isFinite(windSpeed)) {
       return;
     }
-    if (!this.data[this.wind.speedPath]) {
-      this.data[this.wind.speedPath] = [];
+    if (!this.data[WIND_SPEED_PATH]) {
+      this.data[WIND_SPEED_PATH] = [];
     }
-    this.data[this.wind.speedPath].push({ t: at || Date.now(), v: windSpeed });
+    this.data[WIND_SPEED_PATH].push({ t: at || Date.now(), v: windSpeed });
     this.pruneWind(at);
   }
 
   pruneWind(at) {
-    const buf = this.data[this.wind.speedPath];
+    const buf = this.data[WIND_SPEED_PATH];
     if (!Array.isArray(buf)) {
       return;
     }
@@ -193,12 +172,12 @@ class Telemetry {
     // path below so the plugin can raise/clear a "no heading" warning.
     this.computedWindNoHeading = false;
     const d = this.data;
-    const awa = d[this.wind.directionPath]; // apparent wind angle
+    const awa = d[WIND_ANGLE_PATH]; // apparent wind angle
     if (!Number.isFinite(awa)) {
       return null;
     }
     this.pruneWind();
-    const ws = d[this.wind.speedPath];
+    const ws = d[WIND_SPEED_PATH];
     if (!Array.isArray(ws) || !ws.length) {
       return null;
     }
@@ -245,40 +224,14 @@ class Telemetry {
     if (Number.isFinite(d['environment.outside.pressure'])) {
       out.pressure = `${Math.round(units.paToMb(d['environment.outside.pressure']))}mb`;
     }
-    // In 'computed' mode derive true wind from apparent + boat motion.
-    // computeTrueWind returns the rendering pieces, or null. A null WITH the
-    // no-heading flag set means we deliberately render no wind (a computed
-    // point would be erroneous without heading); the plugin warns separately.
-    // A null for any other reason (no apparent data) simply yields no wind.
-    const tw = this.windMode === 'computed' ? this.computeTrueWind() : null;
-    const suppressWind = this.windMode === 'computed' && this.computedWindNoHeading;
-    let dir = null;
+    // Wind is always true wind: computeTrueWind derives it (vector math under
+    // way, apparent-is-true at rest) and returns { dir, speed }, or null. Null
+    // means either no apparent data, or no heading — in the no-heading case it
+    // sets computedWindNoHeading and we render nothing (a compass point without
+    // heading would be wrong); the plugin raises a warning separately.
+    const tw = this.computeTrueWind();
     if (tw) {
-      dir = tw.dir;
-    } else if (!suppressWind && Number.isFinite(d[this.wind.directionPath])) {
-      dir = this.wind.formatDirection(d[this.wind.directionPath], this.trueHeading());
-    }
-    this.pruneWind();
-    let speed = null;
-    if (suppressWind) {
-      speed = null;
-    } else if (tw) {
-      speed = tw.speed;
-    } else {
-      const ws = d[this.wind.speedPath];
-      if (Array.isArray(ws) && ws.length) {
-        const values = ws.map((s) => s.v);
-        const sustained = units.msToKn(mean(values));
-        const gust = units.msToKn(maxGust(values));
-        speed = `${sustained.toFixed(1)}k`;
-        // show the gust only when it meaningfully exceeds the sustained wind
-        if (gust >= sustained + 2) {
-          speed += ` gusts ${Math.round(gust)}k`;
-        }
-      }
-    }
-    if (dir || speed) {
-      out.wind = [dir, speed].filter(Boolean).join(' ');
+      out.wind = [tw.dir, tw.speed].filter(Boolean).join(' ');
     }
     if (Number.isFinite(d['environment.depth.belowSurface'])) {
       out.depth = `Depth ${units.mToFt(d['environment.depth.belowSurface']).toFixed(1)}FT`;

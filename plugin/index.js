@@ -750,7 +750,6 @@ module.exports = (app) => {
         });
     }
     telemetry = new Telemetry({
-      windSource: (settings.telemetry || {}).windSource,
       variationDegrees: (settings.telemetry || {}).magnetic_variation_degrees,
       ...sensorConfig(settings),
     });
@@ -1066,16 +1065,6 @@ module.exports = (app) => {
             vesselName: {
               type: 'string',
               title: 'Vessel name tag for the telemetry line (defaults to the vessel name in Signal K)',
-            },
-            windSource: {
-              type: 'string',
-              title: 'Wind data source',
-              default: 'true',
-              oneOf: [
-                { const: 'true', title: 'True wind — read directionTrue / speedOverGround as-is (use only if the bus supplies genuine true wind)' },
-                { const: 'apparent', title: 'Apparent wind — bow-relative angle from angleApparent / speedApparent' },
-                { const: 'computed', title: 'Computed true wind — derive from apparent + boat speed & heading; falls back to apparent when motion data is missing' },
-              ],
             },
             magnetic_variation_degrees: {
               type: 'number',

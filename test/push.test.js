@@ -22,7 +22,10 @@ function mockDevice(failures = 0) {
 test('push sends a line per tick; wind window survives the send', async (t) => {
   t.mock.timers.enable({ apis: ['setInterval'] });
   const telemetry = new Telemetry();
-  telemetry.update('environment.wind.speedOverGround', 5.29);
+  // wind is always true wind → needs apparent + heading; at rest speed == apparent
+  telemetry.update('environment.wind.angleApparent', 0);
+  telemetry.update('navigation.headingTrue', 0); // due N
+  telemetry.update('environment.wind.speedApparent', 5.29);
   const device = mockDevice();
 
   const stop = startTelemetryPush({
@@ -32,10 +35,10 @@ test('push sends a line per tick; wind window survives the send', async (t) => {
   t.mock.timers.tick(1000);
   await new Promise((resolve) => { setImmediate(resolve); });
   assert.strictEqual(device.sent.length, 1);
-  assert.strictEqual(device.sent[0].text, 'VESSEL | 10.3k');
+  assert.strictEqual(device.sent[0].text, 'VESSEL | N 10.3k');
   assert.strictEqual(device.sent[0].channelIdx, 1);
   // WMO rolling window: the send does NOT clear wind history
-  assert.strictEqual(telemetry.segments().wind, '10.3k');
+  assert.strictEqual(telemetry.segments().wind, 'N 10.3k');
 
   // still data → sends again next tick
   t.mock.timers.tick(1000);
@@ -73,7 +76,9 @@ test('afterBuild fires each tick with the telemetry (for no-heading warning)', a
 test('failed send keeps wind history and logs', async (t) => {
   t.mock.timers.enable({ apis: ['setInterval'] });
   const telemetry = new Telemetry();
-  telemetry.update('environment.wind.speedOverGround', 5.29);
+  telemetry.update('environment.wind.angleApparent', 0);
+  telemetry.update('navigation.headingTrue', 0);
+  telemetry.update('environment.wind.speedApparent', 5.29);
   const device = mockDevice(1);
   const logs = [];
 
@@ -89,6 +94,6 @@ test('failed send keeps wind history and logs', async (t) => {
   t.mock.timers.tick(1000);
   await new Promise((resolve) => { setImmediate(resolve); });
   assert.strictEqual(device.sent.length, 1);
-  assert.strictEqual(device.sent[0].text, '10.3k');
+  assert.strictEqual(device.sent[0].text, 'N 10.3k');
   stop();
 });
