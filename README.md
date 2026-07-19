@@ -7,8 +7,8 @@ Signal K plugin for interfacing with the [MeshCore](https://meshcore.io/) LoRa m
 Connects a Signal K server to a MeshCore Companion radio over USB serial or TCP/WiFi, providing:
 
 - **Telemetry bot** — a compact, human-readable boat-status line pushed to a private MeshCore channel on an interval:
-  `VESSEL | 87.4F | 65%RH | 1019mb | 42S(E) 7.5k gusts 11k | Depth 12.6FT Dist 98FT | SOC 97% 13.3V +6.2A`
-- **Pull verbs** — DM the boat `wx`, `batt`, `pos`, `depth`, `status`, `help`, or `ping` and get an answer.
+  `VESSEL | 87.4F | 65%RH | 1019mb | E 7.5k gusts 11k | Depth 12.6FT Dist 98FT | SOC 97% 13.3V +6.2A`
+- **Pull verbs** — DM the boat `status`/`s`, `wx`/`w`, `batt`/`b`, `pos`/`ps`, `depth`/`d`, `fridge`/`f`, `cabin`/`c`, `help`/`h`, or `ping`/`p` and get an answer.
 - **Digital switching** — crew DM `turn <switch> on|off`, with switch names mapped to real Signal K paths (N2K bank paths supported).
 - **Alerts** — Signal K `alarm`/`emergency` notifications go to crew as DMs and optionally to a channel (field-measured at ~25 ms from notification to radio). `normal`-state clears are deliberately not forwarded. MOB notifications degrade to a text alert with lat/lon (MeshCore has no waypoints).
 - **Crew positions, privately** — the plugin polls crew nodes' telemetry (encrypted, contact-to-contact) and plots them as vessels in Signal K/Freeboard. No broadcast of crew location required.
