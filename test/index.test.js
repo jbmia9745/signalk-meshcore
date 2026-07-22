@@ -58,6 +58,49 @@ test('sensorTempPaths returns only defined strings for default and custom config
   });
 });
 
+const { computeSetupWarnings } = plugin;
+
+test('a fully-configured install produces NO setup warnings (no false positives)', () => {
+  // Mirrors the live boat config: channel under settings.telemetry (not
+  // communications), a crew node, wind data present. Must be silent.
+  const settings = {
+    telemetry: { enabled: true, channelName: 'Vessel_Comm' },
+    nodes: [{ publicKey: 'abc', role: 'crew' }],
+  };
+  const data = {
+    'environment.wind.angleApparent': 0.1,
+    'environment.wind.speedApparent': [{ t: 1, v: 5 }],
+  };
+  assert.deepStrictEqual(computeSetupWarnings(settings, { telemetryData: data }), []);
+});
+
+test('setup warnings flag a missing telemetry channel', () => {
+  const w = computeSetupWarnings({ telemetry: { enabled: true }, nodes: [{ role: 'crew' }] });
+  assert.ok(w.some((x) => x.includes('no telemetry channel')));
+});
+
+test('setup warnings flag no crew assigned', () => {
+  const w = computeSetupWarnings({ telemetry: { channelName: 'C' }, nodes: [] });
+  assert.ok(w.some((x) => x.includes('no crew')));
+});
+
+test('setup warnings flag missing wind data when telemetry data has none', () => {
+  const w = computeSetupWarnings(
+    { telemetry: { channelName: 'C' }, nodes: [{ role: 'crew' }] },
+    { telemetryData: {} },
+  );
+  assert.ok(w.some((x) => x.includes('no wind data')));
+});
+
+test('setup warnings do not check wind when telemetry push is disabled', () => {
+  const w = computeSetupWarnings(
+    { telemetry: { enabled: false }, nodes: [{ role: 'crew' }] },
+    { telemetryData: {} },
+  );
+  assert.ok(!w.some((x) => x.includes('wind')));
+  assert.ok(!w.some((x) => x.includes('channel'))); // push off → channel not required
+});
+
 test('plugin factory builds and exposes start/stop/schema', () => {
   const app = {
     debug() {},

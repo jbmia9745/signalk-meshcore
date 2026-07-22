@@ -73,6 +73,33 @@ function buildSubscriptions(settings) {
   ];
 }
 
+// Pure diagnostic: given saved settings (and optionally the live telemetry
+// data store), return the list of setup gaps to surface in the plugin status
+// line. Kept module-level and pure so it's unit-testable — a false positive
+// here (warning on a correctly-configured install) is worse than no warning.
+function computeSetupWarnings(settings, { telemetryData } = {}) {
+  const w = [];
+  // The telemetry push channel lives in settings.telemetry — NOT the merged
+  // settings.communications (which only spreads telemetry_features/alerts/dms).
+  const tel = (settings && settings.telemetry) || {};
+  const pushOn = tel.enabled !== false;
+  if (pushOn && !tel.channelName) {
+    w.push('no telemetry channel set (Channel messages → channel name)');
+  }
+  const crew = ((settings && settings.nodes) || []).filter((n) => n.role === 'crew').length;
+  if (!crew) {
+    w.push('no crew nodes assigned (commands/alerts need crew)');
+  }
+  // wind needs apparent-wind paths; flag only if telemetry push is on and the
+  // store exists but lacks them (speedApparent is buffered as an array present)
+  if (pushOn && telemetryData
+    && telemetryData['environment.wind.angleApparent'] === undefined
+    && !Array.isArray(telemetryData['environment.wind.speedApparent'])) {
+    w.push('no wind data (check path-mapper / apparent-wind paths)');
+  }
+  return w;
+}
+
 module.exports = (app) => {
   const plugin = {};
   let connection;
@@ -213,25 +240,9 @@ module.exports = (app) => {
   // with no clue why — so surface the actionable gaps right in the plugin
   // status the server admin UI shows, instead of a bland "connected".
   function setupWarnings(settings) {
-    const w = [];
-    const comms = settings.communications || {};
-    if (comms.enabled !== false && !comms.channelName) {
-      w.push('no telemetry channel set');
-    } else if (comms.enabled !== false && alertChannelIdx === null && comms.channelName) {
-      w.push(`channel "${comms.channelName}" not found on radio`);
-    }
-    const crew = (settings.nodes || []).filter((n) => n.role === 'crew').length;
-    if (!crew) {
-      w.push('no crew nodes assigned (commands/alerts need crew)');
-    }
-    // wind needs apparent-wind paths; flag if telemetry is on but they're absent
-    if (telemetry && comms.enabled !== false
-      && telemetry.data
-      && telemetry.data['environment.wind.angleApparent'] === undefined
-      && !Array.isArray(telemetry.data['environment.wind.speedApparent'])) {
-      w.push('no wind data (check path-mapper / apparent-wind paths)');
-    }
-    return w;
+    return computeSetupWarnings(settings, {
+      telemetryData: telemetry ? telemetry.data : null,
+    });
   }
 
   function setStatus(settings) {
@@ -1166,3 +1177,4 @@ module.exports = (app) => {
 // connection or subscription manager.
 module.exports.buildSubscriptions = buildSubscriptions;
 module.exports.sensorTempPaths = sensorTempPaths;
+module.exports.computeSetupWarnings = computeSetupWarnings;
