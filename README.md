@@ -36,6 +36,43 @@ This is a port of [signalk-meshtastic](https://github.com/meri-imperiumi/signalk
 5. **Add crew**: have each crew phone send an advert; their node appears in the plugin's node picker. Assign role `crew`. Crew nodes can then use commands, and receive alerts.
 6. **Private crew positions** (optional): on each crew phone, open the boat radio's contact card → **permissions** and grant **telemetry** (including location). Enable `poll_crew_positions` in the plugin. Crew positions arrive encrypted and appear as vessels in Signal K — only nodes you've configured are plotted ("favorites only"), never the whole mesh.
 
+**Watch the plugin status line** (Signal K admin → Server → Plugin Config, or the dashboard status pill). Once connected it reports setup gaps directly, e.g. *"Connected … — setup: no telemetry channel set; no crew nodes assigned"*. When those clear, you're configured. A silent "nothing happens" almost always means one of those gaps — the status line tells you which.
+
+### Creating the private telemetry channel (the step people get stuck on)
+
+The plugin pushes telemetry to a **named channel that must already exist on the radio with a shared secret**. There is no in-plugin channel creation yet, so you create it once on the radio and mirror it to crew:
+
+1. Connect the radio to the MeshCore web client (Chrome/Edge over USB) or the phone app.
+2. Create a **new channel** with a memorable name (e.g. `Vessel_Comm`) and a **random 128-bit secret** (the client generates one).
+3. On **each crew phone**, add a channel with the **same name and the same secret** — channels are matched by their secret, not their name.
+4. In the plugin's **Channel messages** settings, set the channel name to match.
+5. **Never use the Public channel** — it carries live regional mesh traffic; your telemetry would spam strangers and clutter your own feed.
+
+### Finding your Signal K paths (for the Sensors and Switches settings)
+
+The **Sensors** group (fridge / cabin / battery temperatures) and **Switches** group need the *Signal K path* of each device on your bus. These are boat-specific — instance numbers differ per vessel. To find yours:
+
+1. Signal K admin UI → **Data Browser** (or `Server → Data Browser`).
+2. Filter for `environment` (temperatures) or `electrical.switches` (switches).
+3. Find the sensor by its name/value and copy its full path, e.g. `environment.venus.26.temperature`.
+4. Paste it into the matching field in the plugin's Sensors/Switches settings.
+
+The defaults match the reference vessel; if your fridge command returns "No fridge data," your path differs — look it up here and correct it. On startup the plugin also logs the temperature paths it found, as a hint.
+
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Plugin status shows a "setup:" warning | Missing channel, no crew, or no wind data | The warning names the gap — address that item |
+| Telemetry pushes but no one receives them | Channel name/secret mismatch, or wrong channel | Confirm crew phones have the **same secret** (not just the same name) |
+| Telemetry line has no wind | Apparent-wind paths absent, or path-mapper not aliasing them | Confirm `environment.wind.angleApparent` / `speedApparent` exist in Data Browser; install/configure [signalk-path-mapper](https://www.npmjs.com/package/signalk-path-mapper) |
+| Wind shows but direction seems wrong | No heading source, so no compass placement | Check `navigation.headingTrue` or `headingMagnetic` exists; set `magnetic_variation_degrees` for your area |
+| `fridge`/`cabin`/`batt` temps say "No … data" | Sensor path wrong for your boat | Look up the real path in Data Browser and set it in the Sensors group |
+| Position jumps or shows stale | Multiple GPS sources with no priority | Signal K admin → set source priority on `navigation.position` (your real GPS first, the plugin's radio fallback last) |
+| Radio won't stay connected (reconnect loop) | Serial port contention, or a wedged USB CDC | On Venus, apply the serial-starter `303a` ignore rule (below); if wedged, power-cycle the Cerbo or replug the radio. Avoid rapid repeated restarts |
+| Commands from a crew phone do nothing | Node not assigned role `crew` | Add the node in the plugin's node picker and set role to `crew` |
+| `pos` returns stale/null | No real GNSS fix on the bus | Confirm a genuine GPS source (not null-island, not the radio fallback) before relying on `pos` |
+
 ## Telemetry line format
 
 Pipe-delimited, self-describing units, max 133 chars (the multi-hop-safe MeshCore payload floor). The MeshCore app timestamps every message, so no date/time is embedded.

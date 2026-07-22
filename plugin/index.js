@@ -208,11 +208,41 @@ module.exports = (app) => {
     return context;
   }
 
+  // Diagnostic status line. A silent misconfiguration (no telemetry channel,
+  // no crew, missing wind data) is the #1 reason a new install "does nothing"
+  // with no clue why — so surface the actionable gaps right in the plugin
+  // status the server admin UI shows, instead of a bland "connected".
+  function setupWarnings(settings) {
+    const w = [];
+    const comms = settings.communications || {};
+    if (comms.enabled !== false && !comms.channelName) {
+      w.push('no telemetry channel set');
+    } else if (comms.enabled !== false && alertChannelIdx === null && comms.channelName) {
+      w.push(`channel "${comms.channelName}" not found on radio`);
+    }
+    const crew = (settings.nodes || []).filter((n) => n.role === 'crew').length;
+    if (!crew) {
+      w.push('no crew nodes assigned (commands/alerts need crew)');
+    }
+    // wind needs apparent-wind paths; flag if telemetry is on but they're absent
+    if (telemetry && comms.enabled !== false
+      && telemetry.data
+      && telemetry.data['environment.wind.angleApparent'] === undefined
+      && !Array.isArray(telemetry.data['environment.wind.speedApparent'])) {
+      w.push('no wind data (check path-mapper / apparent-wind paths)');
+    }
+    return w;
+  }
+
   function setStatus(settings) {
     const online = nodeDb ? nodeDb.onlineCount(ONLINE_THRESHOLD_SECS) : 0;
-    app.setPluginStatus(
-      `Connected to MeshCore node at ${settings.device.address}, ${online} nodes seen recently`,
-    );
+    const warnings = setupWarnings(settings);
+    const base = `Connected at ${settings.device.address}, ${online} nodes seen recently`;
+    if (warnings.length) {
+      app.setPluginStatus(`${base} — setup: ${warnings.join('; ')}`);
+    } else {
+      app.setPluginStatus(base);
+    }
   }
 
   // "Favorites only": vesselify just the nodes the user has configured
@@ -683,6 +713,9 @@ module.exports = (app) => {
     }
 
     subscribeSignalK(settings);
+    // log the configured sensor temperature paths as a commissioning hint —
+    // helps a user confirm/correct the Sensors settings against their own bus
+    app.debug(`Sensor temperature paths: ${sensorTempPaths(settings).join(', ')}`);
     startPositionAdverts(settings);
     startCrewPolling(settings);
     startRadioGnssFallback(settings);
