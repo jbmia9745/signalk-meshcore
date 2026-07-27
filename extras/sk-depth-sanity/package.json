@@ -1,0 +1,10 @@
+{
+  "name": "sk-depth-sanity",
+  "version": "0.1.0",
+  "description": "Null implausible depth values (N2K sentinel garbage) before they enter the data model",
+  "main": "index.js",
+  "keywords": [
+    "signalk-node-server-plugin"
+  ],
+  "license": "GPL-3.0"
+}
