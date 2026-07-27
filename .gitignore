@@ -8,5 +8,7 @@ spike/spike-data/
 *.png
 claude.md
 CLAUDE.md
+AGENTS.md
+guiding-principles*.md
 
 docs/handoff-*.md

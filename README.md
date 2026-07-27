@@ -72,6 +72,7 @@ The defaults match the reference vessel; if your fridge command returns "No frid
 | Radio won't stay connected (reconnect loop) | Serial port contention, or a wedged USB CDC | On Venus, apply the serial-starter `303a` ignore rule (below); if wedged, power-cycle the Cerbo or replug the radio. Avoid rapid repeated restarts |
 | Commands from a crew phone do nothing | Node not assigned role `crew` | Add the node in the plugin's node picker and set role to `crew` |
 | `pos` returns stale/null | No real GNSS fix on the bus | Confirm a genuine GPS source (not null-island, not the radio fallback) before relying on `pos` |
+| Depth reads absurdly huge (~140,911,000 FT / ~42,949,673 m) | Depth instrument lost bottom lock and sent an N2K "no reading" sentinel (`0xFFFFFFFC`, PGN 128267) that slips past the parser as a real number | Not a real depth — the sounder has no echo (soft/silty bottom, aeration, dry transducer). If it recurs, filter server-side: a small plugin nulling `environment.depth.*` above a plausibility limit via `registerDeltaInputHandler` |
 
 ## Telemetry line format
 
